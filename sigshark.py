@@ -233,9 +233,10 @@ def read_pcap(pcap_fn, flatten):
     PCAP_GLOBAL_HDR_LEN = 24
     PCAP_PKT_HDR_LEN = 16
     MAX_PKT_LEN = 32768
-    dlt_map = {0: (lambda p: pkt[0:4] == b'\x02\x00\x00\x00', 4),
-               1: (lambda p: pkt[12:14] == b'\x08\x00', 14),
-               113: (lambda p: pkt[14:16] == b'\x08\x00', 16)}
+    dlt_map = {0:   (lambda p: pkt[0:4]   == b'\x02\x00\x00\x00',  4),
+               1:   (lambda p: pkt[12:14] == b'\x08\x00',         14),
+               109: (lambda p: pkt[0:4]   == b'\x02\x00\x00\x00', 12),
+               113: (lambda p: pkt[14:16] == b'\x08\x00',         16)}
 
     pcap_hdr = None
     frames = []
