@@ -49,9 +49,6 @@ file.
 sigshark is still under development. It currently has the following
 limitations:
 
-- __The input pcap file must be flattened, i.e. only one SCTP chunk per
-  IP packet__
-
 - The transaction tracking currently only works for pcaps that contain
   traffic for a single endpoint, or more precisely, for a single
   TCAP-transaction-ID generating entity (which can talk to any number
@@ -78,17 +75,22 @@ limitations:
 ## Usage
 
 ```
-usage: sigshark.py [-h] [--display-filter DISPLAY_FILTER] [--drop-ip DROP_IP]
-                   read_file write_file own_ip
+usage: sigshark.py [-h] [--flatten] [--sort OWN_IP] [--display-filter DISPLAY_FILTER]
+                   [--drop-ip DROP_IP] [--version]
+                   read_file write_file
 
 positional arguments:
   read_file             input pcap filename (*not* pcap-ng!)
   write_file            output pcap filename
-  own_ip                (start of) the ip address of the node the traffic was captured from,
-                        e.g.: '192.168.23'
 
 optional arguments:
   -h, --help            show this help message and exit
+  --flatten, -f         save each sctp chunk in its own sctp packet. This *must* be performed for
+                        transaction sorting to work, but can be skipped to save time if the pcap
+                        file is already flat
+  --sort OWN_IP, -s OWN_IP
+                        sort pcap file by tcap transactions. Specify the (start of) the ip
+                        address of the node the traffic was captured from, e.g.: '192.168.23'
   --display-filter DISPLAY_FILTER, -Y DISPLAY_FILTER
                         Wireshark display filter: the resulting pcap will contain all
                         transactions that contain at least one message for which the filter
@@ -98,4 +100,5 @@ optional arguments:
                         (start of) ip address of packets that should not be considered for
                         transaction analysis, e.g.: '10. 192.168.23.42' (can be specified
                         multiple times)
+  --version, -V         show program's version number and exit
 ```
