@@ -96,6 +96,9 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
                 raise Exception("pcap contains more than one chunk per sctp "
                                 "packet - run again with --flatten")
 
+            src_ips = pkt[IP_SRC].split('-')
+            dst_ips = pkt[IP_DST].split('-')
+
             all_pkts += 1
             if all_pkts % 10000 == 0:
                 print(str(all_pkts), "pkts processed...")
@@ -103,16 +106,20 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
             if drop_ips:
                 drop=False
                 for drop_ip in drop_ips:
-                    if pkt[IP_SRC].startswith(drop_ip) or \
-                       pkt[IP_DST].startswith(drop_ip):
-                        drop=True
-                        dropped_ip_pkts += 1
-                        break
+                    for ip in src_ips + dst_ips:
+                        if ip.startswith(drop_ip):
+                            drop=True
+                            dropped_ip_pkts += 1
+                            break
                 if drop:
                     continue
 
             frame = int(pkt[FRAME]) - 1 # -1 to make it start at 0
-            outbound = True if pkt[IP_DST].startswith(own_ip) else False
+            outbound = False
+            for ip in src_ips:
+                if ip.startswith(own_ip):
+                    outbound = True
+                    break
             if pkt[BEGIN]:
                 if outbound:
                     tas[pkt[OTID]] = [frame]
@@ -176,18 +183,28 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
 
 def flatten_sctp(ldlt, pkt):
     try:
-        # get header len
-        lih, = struct.unpack("!B", pkt[ldlt:(ldlt + 1)])
-        lih = (lih & 0xf) * 4
-        # length of pkt, according to ip header
-        lp, = struct.unpack("!H", pkt[(ldlt + 2):(ldlt + 4)])
-        lp += ldlt
-        # get protocol
-        prot, = struct.unpack("!B", pkt[(ldlt + 9):(ldlt + 10)])
+        # length of header before current ip header (e.g. dlt and
+        # previous ip header)
+        lbef = ldlt
+        # iterate over multiple ip headers in case of ip-in-ip
+        while True:
+            # get ip header len
+            lih, = struct.unpack("!B", pkt[lbef:(lbef + 1)])
+            lih = (lih & 0xf) * 4
+            # get protocol
+            prot, = struct.unpack("!B", pkt[(lbef + 9):(lbef + 10)])
+            # if it's not ip-in-ip, exit the loop
+            if prot != 4:
+                break
+            # add ip header length to "before" header length
+            lbef += lih
         # if sctp
         if prot == 132:
+            # length of pkt, according to ip header
+            lp, = struct.unpack("!H", pkt[(lbef + 2):(lbef + 4)])
+            lp += lbef
             # calc length from start of pkt up to end of sctp hdr
-            lp_sctp = ldlt + lih + 12
+            lp_sctp = lbef + lih + 12
             # get len of first chunk (2 = chunk len field pos)
             lc1, = struct.unpack("!H", pkt[(lp_sctp + 2):(lp_sctp + 4)])
             # add padding bytes to len (if any)
@@ -197,13 +214,13 @@ def flatten_sctp(ldlt, pkt):
             # check if pkt is longer than that, i.e. contains 2nd chunk
             if lp > lp_c1:
                 # ip header up until len field
-                pkt_start = pkt[0:(ldlt + 2)]
+                pkt_start = pkt[0:(lbef + 2)]
                 # save complete pkt with first chunk and new ip length
                 pkts_out = [pkt_start +
-                            struct.pack("!H", lp_c1 - ldlt) +
-                            pkt[(ldlt + 4):lp_c1]]
+                            struct.pack("!H", lp_c1 - lbef) +
+                            pkt[(lbef + 4):lp_c1]]
                 # pkt from after ip len field up to end of sctp header
-                pkt_sctp = pkt[(ldlt + 4):lp_sctp]
+                pkt_sctp = pkt[(lbef + 4):lp_sctp]
                 # remember previous (1st) chunk end position in pkt
                 lp_old_cx = lp_c1
                 while True:
@@ -216,7 +233,7 @@ def flatten_sctp(ldlt, pkt):
                     lp_cx = lp_old_cx + lcx
                     # save pkt with current chunk
                     pkts_out.append(pkt_start +
-                                    struct.pack("!H", lp_sctp - ldlt + lcx) +
+                                    struct.pack("!H", lp_sctp - lbef + lcx) +
                                     pkt_sctp +
                                     pkt[lp_old_cx:lp_cx])
                     # if pkt doesn't contain another chunk, exit
