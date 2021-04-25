@@ -190,6 +190,8 @@ def flatten_sctp(ldlt, pkt):
             lp_sctp = ldlt + lih + 12
             # get len of first chunk (2 = chunk len field pos)
             lc1, = struct.unpack("!H", pkt[(lp_sctp + 2):(lp_sctp + 4)])
+            # add padding bytes to len (if any)
+            lc1 += (4 - (lc1 % 4)) if (lc1 % 4) else 0
             # calc len of pkt from start to end of first chunk
             lp_c1 = lp_sctp + lc1
             # check if pkt is longer than that, i.e. contains 2nd chunk
@@ -208,6 +210,8 @@ def flatten_sctp(ldlt, pkt):
                     # get len of next chunk (2 = chunk length field pos)
                     lcx, = struct.unpack("!H", pkt[(lp_old_cx + 2):
                                                    (lp_old_cx + 4)])
+                    # add padding bytes to len (if any)
+                    lcx += (4 - (lcx % 4)) if (lcx % 4) else 0
                     # calc end position of current chunk
                     lp_cx = lp_old_cx + lcx
                     # save pkt with current chunk
@@ -339,16 +343,16 @@ ofn = args.write_file
 
 if args.flatten or args.own_ip:
 
-    print("\n== reading pcap file")
+    print(f"\n== reading pcap file '{ifn}'")
     pcap_hdr, frames = read_pcap(ifn, args.flatten)
 
     if args.flatten:
-        print("\n== writing flattened pcap file")
+        print(f"\n== writing flattened pcap file '{ofn}'")
         write_pcap(ofn, pcap_hdr, frames)
         ifn = ofn
 
     if args.own_ip:
-        print("\n== getting transactions from pcap")
+        print(f"\n== getting transactions from pcap '{ifn}'")
         tas_done = get_pcap_transactions(ifn, args.own_ip, args.drop_ip)
 
         match_frames = None
@@ -356,10 +360,10 @@ if args.flatten or args.own_ip:
             print("\n== applying display filter")
             match_frames = filter_pcap(ifn, args.display_filter)
 
-        print("\n== writing sorted pcap file")
+        print(f"\n== writing sorted pcap file '{ofn}'")
         write_sorted_pcap(tas_done, ofn, pcap_hdr, frames, match_frames)
 
-    print(f"\n== {ofn} done")
+    print(f"\n== '{ofn}' done")
 
 else:
     print("nothing to do. specify --flatten and/or --sort")
