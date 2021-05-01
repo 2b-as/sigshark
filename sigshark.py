@@ -31,6 +31,12 @@ def getopts():
                         "one message for which the filter matches, e.g.: "
                         "'gsm_old.localValue == 2' will result in the output "
                         "containing all updateLocation transactions")
+    parser.add_argument("--insert-dummy", "-i",
+                        action = "store_true",
+                        help = "Insert a dummy packet between transactions "
+                        "so it is easier to see where transactions start and "
+                        "end. Note: the dummy packets will be shown as "
+                        "'Malformed Packet' in Wireshark")
     parser.add_argument("--drop-ip", "-d",
                         action = "append",
                         help = "(start of) ip address of packets that "
@@ -339,7 +345,8 @@ def write_pcap(pcap_fn, pcap_hdr, frames):
 
         print(f"wrote {frames_written} pkts")
 
-def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames):
+def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames,
+                      insert_dummy):
     with open(pcap_fn, "wb") as ofh:
         if ofh.write(pcap_hdr) != len(pcap_hdr):
             raise Exception("write failure (pcap header)")
@@ -362,6 +369,8 @@ def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames):
                         frames_written += 1
                         if ofh.write(frames[ta_frame]) != len(frames[ta_frame]):
                             raise Exception(f"write failure (frame {frame})")
+                    if insert_dummy:
+                        ofh.write(b'\x00' * 16)
 
         print(f"wrote {frames_written} pkts\nwrote {tas_written} transactions")
 
@@ -390,7 +399,8 @@ if args.flatten or args.sort:
             match_frames = filter_pcap(ifn, args.display_filter)
 
         print(f"\n== writing sorted pcap file '{ofn}'")
-        write_sorted_pcap(tas_done, ofn, pcap_hdr, frames, match_frames)
+        write_sorted_pcap(tas_done, ofn, pcap_hdr, frames, match_frames,
+                          args.insert_dummy)
 
     print(f"\n== '{ofn}' done")
 
