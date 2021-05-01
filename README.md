@@ -1,10 +1,11 @@
 # sigshark
 
-A tshark wrapper which adds TCAP (MAP/CAP) transaction tracking
+A tshark wrapper which adds TCAP (MAP/CAP) and Diameter transaction
+tracking/grouping
 
 ## Problems sigshark tries to solve
 
-### Sorting a pcap file by TCAP transactions
+### Sorting a pcap file by its TCAP and Diameter transactions
 
 If you look at pcap files captured from signaling nodes, there are
 many transactions running in parallel. This makes it difficult to
@@ -18,9 +19,9 @@ time to set / clear each filter.
 
 Sigshark will output a pcap file in which the packets are grouped by
 transaction, i.e. the file will contain the corresponding `Begin (->
-Continue ...) -> End/Abort` packets next to each other, followed by
-the same for subsequent transactions, while preserving the original
-timestamps of the packets.
+Continue ...) -> End/Abort` or `Request -> Answer` packets next to
+each other, followed by the same for subsequent transactions, while
+preserving the original timestamps of the packets.
 
 ### Applying filters to transactions instead of messages
 
@@ -67,16 +68,14 @@ limitations:
   192.168.1.10 and 192.168.1.11, you can specify 192.168.1.1, but that
   will also match 192.168.1.1, 192.168.1.12, 192.168.1.100 and so on.
 
-- Currently support for SS7 TCAP (used for MAP/CAP) only. Diameter
-  will be added in the future, GTP probably not
-
 - There are likely bugs :)
 
 ## Usage
 
 ```
-usage: sigshark.py [-h] [--flatten] [--sort OWN_IP] [--display-filter DISPLAY_FILTER]
-                   [--drop-ip DROP_IP] [--version]
+usage: sigshark.py [-h] [--flatten] [--sort OWN_IP]
+                   [--display-filter DISPLAY_FILTER] [--drop-ip DROP_IP]
+                   [--version]
                    read_file write_file
 
 positional arguments:
@@ -85,20 +84,23 @@ positional arguments:
 
 optional arguments:
   -h, --help            show this help message and exit
-  --flatten, -f         save each sctp chunk in its own sctp packet. This *must* be performed for
-                        transaction sorting to work, but can be skipped to save time if the pcap
-                        file is already flat
+  --flatten, -f         save each sctp chunk in its own sctp packet. This
+                        *must* be performed for transaction sorting to work,
+                        but can be skipped to save time if the pcap file is
+                        already flat
   --sort OWN_IP, -s OWN_IP
-                        sort pcap file by tcap transactions. Specify the (start of) the ip
-                        address of the node the traffic was captured from, e.g.: '192.168.23'
+                        sort pcap file by tcap and diameter transactions.
+                        Specify the (start of) the ip address of the node the
+                        traffic was captured from, e.g.: '192.168.23'
   --display-filter DISPLAY_FILTER, -Y DISPLAY_FILTER
-                        Wireshark display filter: the resulting pcap will contain all
-                        transactions that contain at least one message for which the filter
-                        matches, e.g.: 'gsm_old.localValue == 2' will result in the output
+                        Wireshark display filter: the resulting pcap will
+                        contain all transactions that contain at least one
+                        message for which the filter matches, e.g.:
+                        'gsm_old.localValue == 2' will result in the output
                         containing all updateLocation transactions
   --drop-ip DROP_IP, -d DROP_IP
-                        (start of) ip address of packets that should not be considered for
-                        transaction analysis, e.g.: '10. 192.168.23.42' (can be specified
-                        multiple times)
+                        (start of) ip address of packets that should not be
+                        considered for transaction analysis, e.g.: '10.
+                        192.168.23.42' (can be specified multiple times)
   --version, -V         show program's version number and exit
 ```

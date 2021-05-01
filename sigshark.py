@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.5"
+version="0.6"
 
 import csv, sys, os, struct, argparse
 
@@ -24,9 +24,10 @@ def getopts():
     parser.add_argument("--sort", "-s",
                         dest='own_ip',
                         metavar='OWN_IP',
-                        help = "sort pcap file by tcap transactions. Specify "
-                        "the (start of) the ip address of the node the "
-                        "traffic was captured from, e.g.: '192.168.23'")
+                        help = "sort pcap file by tcap and diameter "
+                        "transactions. Specify the (start of) the ip address "
+                        "of the node the traffic was captured from, e.g.: "
+                        "'192.168.23'")
     parser.add_argument("--display-filter", "-Y",
                         help = "Wireshark display filter: the resulting pcap "
                         "will contain all transactions that contain at least "
@@ -58,7 +59,7 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
     all_pkts = 0
     dropped_ip_pkts = 0
     dropped_pkts = 0
-    non_tcap_pkts = 0
+    unsupported_pkts = 0
 
     with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
                   "-e frame.number "
@@ -72,6 +73,10 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
                   "-e tcap.continue_element "
                   "-e tcap.end_element "
                   "-e tcap.abort_element "
+                  "-e diameter.flags.request "
+                  "-e diameter.hopbyhopid "
+                  "-e diameter.endtoendid "
+                  "-e sctp.fragment "
                   "-r " + pcap_fn) as fh:
 
         FRAME  =  0
@@ -85,6 +90,10 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
         CONT   =  8
         END    =  9
         ABORT  = 10
+        DIAREQ = 11
+        DIAHBH = 12
+        DIAE2E = 13
+        FRAGS  = 14
 
         tas = {}
         remote_begins = {}
@@ -92,7 +101,8 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
 
         for pkt in csv.reader(fh):
 
-            if len("".join([pkt[BEGIN], pkt[CONT], pkt[END], pkt[ABORT]])) > 1:
+            if len("".join([pkt[BEGIN], pkt[CONT], pkt[END], pkt[ABORT],
+                            pkt[DIAREQ]])) > 1:
                 raise Exception("pcap contains more than one chunk per sctp "
                                 "packet - run again with --flatten")
 
@@ -114,7 +124,15 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
                 if drop:
                     continue
 
-            frame = int(pkt[FRAME]) - 1 # -1 to make it start at 0
+            frames = []
+            if pkt[FRAGS]:
+                # -1 to make it start at 0
+                frames = list(map(lambda f: int(f) - 1, pkt[FRAGS].split('-')))
+                #print("using fragments", str(frames), "instead of",
+                #      int(pkt[FRAME]) - 1)
+            else:
+                frames = [int(pkt[FRAME]) - 1] # -1 to make it start at 0
+
             outbound = False
             for ip in src_ips:
                 if ip.startswith(own_ip):
@@ -122,18 +140,18 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
                     break
             if pkt[BEGIN]:
                 if outbound:
-                    tas[pkt[OTID]] = [frame]
+                    tas[pkt[OTID]] = frames
                 else:
-                    remote_begins[pkt[CGPA] + "_" + pkt[OTID]] = frame
+                    remote_begins[pkt[CGPA] + "_" + pkt[OTID]] = frames
             elif pkt[CONT]:
                 if outbound:
                     local_tid = pkt[OTID]
                     if local_tid in tas:
-                        tas[local_tid].append(frame)
+                        tas[local_tid].extend(frames)
                     else:
                         key = pkt[CDPA] + "_" + pkt[DTID]
                         if key in remote_begins:
-                            tas[local_tid] = [remote_begins[key], frame]
+                            tas[local_tid] = remote_begins[key] + frames
                             del remote_begins[key]
                             rem_to_loc_tids[key] = local_tid
                         else:
@@ -142,7 +160,7 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
                 else:
                     local_tid = pkt[DTID]
                     if local_tid in tas:
-                        tas[local_tid].append(frame)
+                        tas[local_tid].extend(frames)
                         rem_to_loc_tids[pkt[CGPA] + "_" + pkt[OTID]] = local_tid
                     else:
                         #print(f"cannot find transaction for {pkt} - dropping")
@@ -151,13 +169,13 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
                 if outbound:
                     key = pkt[CDPA] + "_" + pkt[DTID]
                     if key in remote_begins:
-                        tas_done.append([remote_begins[key], frame])
+                        tas_done.append(remote_begins[key] + frames)
                         del remote_begins[key]
                     elif key in rem_to_loc_tids:
                         local_tid = rem_to_loc_tids[key]
                         del rem_to_loc_tids[key]
                         if local_tid in tas:
-                            tas_done.append(tas[local_tid] + [frame])
+                            tas_done.append(tas[local_tid] + frames)
                             del tas[local_tid]
                         else:
                             #print(f"cannot find transaction for {pkt} - dropping")
@@ -165,20 +183,30 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
                 else:
                     local_tid = pkt[DTID]
                     if local_tid in tas:
-                        tas_done.append(tas[local_tid] + [frame])
+                        tas_done.append(tas[local_tid] + frames)
                         del tas[local_tid]
                     else:
                         #print(f"cannot find transaction for {pkt} - dropping")
                         dropped_pkts += 1
+            elif pkt[DIAHBH]:
+                key = "_".join([pkt[DIAHBH], pkt[DIAE2E]])
+                if int(pkt[DIAREQ]):
+                    tas[key] = frames
+                elif key in tas:
+                    tas_done.append(tas[key] + frames)
+                    del tas[key]
+                else:
+                    #print(f"cannot find dia transaction for {pkt} - dropping")
+                    dropped_pkts += 1
             else:
-                non_tcap_pkts += 1
+                unsupported_pkts += 1
 
     print(f"\ntotal number of pkts read: {all_pkts}\n"
-          f"dropped non-tcap pkts: {non_tcap_pkts}\n"
+          f"dropped non-supported pkts: {unsupported_pkts}\n"
           f"pkts dropped due to missing begin of transaction: {dropped_pkts}\n"
           f"transactions dropped due to missing end: ", len(tas), "\n"
           f"pkts dropped by ip filter: {dropped_ip_pkts}\n"
-          "number of completed transactions found:", len(tas_done))
+          "number of completed tcap/diameter transactions found:", len(tas_done))
     return tas_done
 
 def flatten_sctp(ldlt, pkt):
@@ -338,7 +366,7 @@ def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames):
         tas_written = 0
         for ta in tas_done:
             write_ta = False
-            if match_frames:
+            if match_frames and len(match_frames):
                 for ta_frame in ta:
                     if ta_frame in match_frames:
                         write_ta = True
