@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.7"
+version="0.8"
 
 import csv, sys, os, struct, argparse
 
@@ -51,15 +51,21 @@ def filter_pcap(pcap_fn, filter_exp):
         print(len(frames), "matching pkts")
         return set(frames)
 
+def ta_done(ta, last_frames, tas_done):
+    tas_done.setdefault(ta['start_ts'], [])
+    tas_done[ta['start_ts']].append(ta['frames'] + last_frames)
+
 def get_pcap_transactions(pcap_fn, drop_ips):
-    tas_done = []
+    tas_done = {}
     all_pkts = 0
     dropped_ip_pkts = 0
     dropped_pkts = 0
     unsupported_pkts = 0
+    completed_tas = 0
 
     with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
                   "-e frame.number "
+                  "-e frame.time_epoch "
                   "-e ip.src "
                   "-e ip.dst "
                   "-e sccp.calling.digits "
@@ -77,20 +83,21 @@ def get_pcap_transactions(pcap_fn, drop_ips):
                   "-r " + pcap_fn) as fh:
 
         FRAME  =  0
-        IP_SRC =  1
-        IP_DST =  2
-        CGPA   =  3
-        CDPA   =  4
-        OTID   =  5
-        DTID   =  6
-        BEGIN  =  7
-        CONT   =  8
-        END    =  9
-        ABORT  = 10
-        DIAREQ = 11
-        DIAHBH = 12
-        DIAE2E = 13
-        FRAGS  = 14
+        EPOCH  =  1
+        IP_SRC =  2
+        IP_DST =  3
+        CGPA   =  4
+        CDPA   =  5
+        OTID   =  6
+        DTID   =  7
+        BEGIN  =  8
+        CONT   =  9
+        END    = 10
+        ABORT  = 11
+        DIAREQ = 12
+        DIAHBH = 13
+        DIAE2E = 14
+        FRAGS  = 15
 
         tas = {}
         map_tids = {}
@@ -130,16 +137,17 @@ def get_pcap_transactions(pcap_fn, drop_ips):
                 frames = [int(pkt[FRAME]) - 1] # -1 to make it start at 0
 
             if pkt[BEGIN]:
-                tas['_'.join([pkt[CGPA], pkt[OTID]])] = frames
+                tas['_'.join([pkt[CGPA], pkt[OTID]])] = {'start_ts': pkt[EPOCH],
+                                                         'frames': frames}
             elif pkt[CONT]:
                 okey = '_'.join([pkt[CGPA], pkt[OTID]])
                 dkey = '_'.join([pkt[CDPA], pkt[DTID]])
                 if okey in tas:
-                    tas[okey].extend(frames)
+                    tas[okey]['frames'].extend(frames)
                     map_tids[dkey] = okey
                     map_tids[okey] = dkey
                 elif dkey in tas:
-                    tas[dkey].extend(frames)
+                    tas[dkey]['frames'].extend(frames)
                     map_tids[dkey] = okey
                     map_tids[okey] = dkey
                 else:
@@ -148,24 +156,27 @@ def get_pcap_transactions(pcap_fn, drop_ips):
             elif pkt[END] or pkt[ABORT]:
                 key = '_'.join([pkt[CDPA], pkt[DTID]])
                 if key in tas:
-                    tas_done.append(tas[key] + frames)
+                    ta_done(tas[key], frames, tas_done)
                     del tas[key]
                     if key in map_tids:
                         del map_tids[map_tids[key]], map_tids[key]
+                    completed_tas += 1
                 elif key in map_tids:
                     key2 = map_tids[key]
-                    tas_done.append(tas[key2] + frames)
+                    ta_done(tas[key2], frames, tas_done)
                     del tas[key2], map_tids[key], map_tids[key2]
+                    completed_tas += 1
                 else:
                     #print(f"cannot find transaction for {pkt} - dropping")
                     dropped_pkts += 1
             elif pkt[DIAHBH]:
                 key = "_".join([pkt[DIAHBH], pkt[DIAE2E]])
                 if int(pkt[DIAREQ]):
-                    tas[key] = frames
+                    tas[key] = {'start_ts': pkt[EPOCH], 'frames': frames}
                 elif key in tas:
-                    tas_done.append(tas[key] + frames)
+                    ta_done(tas[key], frames, tas_done)
                     del tas[key]
+                    completed_tas += 1
                 else:
                     #print(f"cannot find dia transaction for {pkt} - dropping")
                     dropped_pkts += 1
@@ -177,7 +188,7 @@ def get_pcap_transactions(pcap_fn, drop_ips):
           f"pkts dropped due to missing begin of transaction: {dropped_pkts}\n"
           f"transactions dropped due to missing end: ", len(tas), "\n"
           f"pkts dropped by ip filter: {dropped_ip_pkts}\n"
-          "number of completed tcap/diameter transactions found:", len(tas_done))
+          f"number of completed tcap/diameter transactions found: {completed_tas}")
     return tas_done
 
 def flatten_sctp(ldlt, pkt):
@@ -335,21 +346,22 @@ def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames):
 
         frames_written = 0
         tas_written = 0
-        for ta in tas_done:
-            write_ta = False
-            if match_frames and len(match_frames):
-                for ta_frame in ta:
-                    if ta_frame in match_frames:
-                        write_ta = True
-                        break
-            else:
-                write_ta = True
-            if write_ta:
-                tas_written += 1
-                for ta_frame in ta:
-                    frames_written += 1
-                    if ofh.write(frames[ta_frame]) != len(frames[ta_frame]):
-                        raise Exception("write failure (frame " + frame + ")")
+        for start_ts in sorted(tas_done):
+            for ta in tas_done[start_ts]:
+                write_ta = False
+                if match_frames and len(match_frames):
+                    for ta_frame in ta:
+                        if ta_frame in match_frames:
+                            write_ta = True
+                            break
+                else:
+                    write_ta = True
+                if write_ta:
+                    tas_written += 1
+                    for ta_frame in ta:
+                        frames_written += 1
+                        if ofh.write(frames[ta_frame]) != len(frames[ta_frame]):
+                            raise Exception(f"write failure (frame {frame})")
 
         print(f"wrote {frames_written} pkts\nwrote {tas_written} transactions")
 
