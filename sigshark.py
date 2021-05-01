@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.6"
+version="0.7"
 
 import csv, sys, os, struct, argparse
 
@@ -22,12 +22,9 @@ def getopts():
                         "work, but can be skipped to save time if the pcap "
                         "file is already flat")
     parser.add_argument("--sort", "-s",
-                        dest='own_ip',
-                        metavar='OWN_IP',
+                        action = "store_true",
                         help = "sort pcap file by tcap and diameter "
-                        "transactions. Specify the (start of) the ip address "
-                        "of the node the traffic was captured from, e.g.: "
-                        "'192.168.23'")
+                        "transactions.")
     parser.add_argument("--display-filter", "-Y",
                         help = "Wireshark display filter: the resulting pcap "
                         "will contain all transactions that contain at least "
@@ -54,7 +51,7 @@ def filter_pcap(pcap_fn, filter_exp):
         print(len(frames), "matching pkts")
         return set(frames)
 
-def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
+def get_pcap_transactions(pcap_fn, drop_ips):
     tas_done = []
     all_pkts = 0
     dropped_ip_pkts = 0
@@ -96,8 +93,7 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
         FRAGS  = 14
 
         tas = {}
-        remote_begins = {}
-        rem_to_loc_tids = {}
+        map_tids = {}
 
         for pkt in csv.reader(fh):
 
@@ -133,61 +129,36 @@ def get_pcap_transactions(pcap_fn, own_ip, drop_ips):
             else:
                 frames = [int(pkt[FRAME]) - 1] # -1 to make it start at 0
 
-            outbound = False
-            for ip in src_ips:
-                if ip.startswith(own_ip):
-                    outbound = True
-                    break
             if pkt[BEGIN]:
-                if outbound:
-                    tas[pkt[OTID]] = frames
-                else:
-                    remote_begins[pkt[CGPA] + "_" + pkt[OTID]] = frames
+                tas['_'.join([pkt[CGPA], pkt[OTID]])] = frames
             elif pkt[CONT]:
-                if outbound:
-                    local_tid = pkt[OTID]
-                    if local_tid in tas:
-                        tas[local_tid].extend(frames)
-                    else:
-                        key = pkt[CDPA] + "_" + pkt[DTID]
-                        if key in remote_begins:
-                            tas[local_tid] = remote_begins[key] + frames
-                            del remote_begins[key]
-                            rem_to_loc_tids[key] = local_tid
-                        else:
-                            #print(f"cannot find transaction for {pkt} - dropping")
-                            dropped_pkts += 1
+                okey = '_'.join([pkt[CGPA], pkt[OTID]])
+                dkey = '_'.join([pkt[CDPA], pkt[DTID]])
+                if okey in tas:
+                    tas[okey].extend(frames)
+                    map_tids[dkey] = okey
+                    map_tids[okey] = dkey
+                elif dkey in tas:
+                    tas[dkey].extend(frames)
+                    map_tids[dkey] = okey
+                    map_tids[okey] = dkey
                 else:
-                    local_tid = pkt[DTID]
-                    if local_tid in tas:
-                        tas[local_tid].extend(frames)
-                        rem_to_loc_tids[pkt[CGPA] + "_" + pkt[OTID]] = local_tid
-                    else:
-                        #print(f"cannot find transaction for {pkt} - dropping")
-                        dropped_pkts += 1
+                    #print(f"cannot find transaction for {pkt} - dropping")
+                    dropped_pkts += 1
             elif pkt[END] or pkt[ABORT]:
-                if outbound:
-                    key = pkt[CDPA] + "_" + pkt[DTID]
-                    if key in remote_begins:
-                        tas_done.append(remote_begins[key] + frames)
-                        del remote_begins[key]
-                    elif key in rem_to_loc_tids:
-                        local_tid = rem_to_loc_tids[key]
-                        del rem_to_loc_tids[key]
-                        if local_tid in tas:
-                            tas_done.append(tas[local_tid] + frames)
-                            del tas[local_tid]
-                        else:
-                            #print(f"cannot find transaction for {pkt} - dropping")
-                            dropped_pkts += 1
+                key = '_'.join([pkt[CDPA], pkt[DTID]])
+                if key in tas:
+                    tas_done.append(tas[key] + frames)
+                    del tas[key]
+                    if key in map_tids:
+                        del map_tids[map_tids[key]], map_tids[key]
+                elif key in map_tids:
+                    key2 = map_tids[key]
+                    tas_done.append(tas[key2] + frames)
+                    del tas[key2], map_tids[key], map_tids[key2]
                 else:
-                    local_tid = pkt[DTID]
-                    if local_tid in tas:
-                        tas_done.append(tas[local_tid] + frames)
-                        del tas[local_tid]
-                    else:
-                        #print(f"cannot find transaction for {pkt} - dropping")
-                        dropped_pkts += 1
+                    #print(f"cannot find transaction for {pkt} - dropping")
+                    dropped_pkts += 1
             elif pkt[DIAHBH]:
                 key = "_".join([pkt[DIAHBH], pkt[DIAE2E]])
                 if int(pkt[DIAREQ]):
@@ -387,7 +358,7 @@ args = getopts()
 ifn = args.read_file
 ofn = args.write_file
 
-if args.flatten or args.own_ip:
+if args.flatten or args.sort:
 
     print(f"\n== reading pcap file '{ifn}'")
     pcap_hdr, frames = read_pcap(ifn, args.flatten)
@@ -397,9 +368,9 @@ if args.flatten or args.own_ip:
         write_pcap(ofn, pcap_hdr, frames)
         ifn = ofn
 
-    if args.own_ip:
+    if args.sort:
         print(f"\n== getting transactions from pcap '{ifn}'")
-        tas_done = get_pcap_transactions(ifn, args.own_ip, args.drop_ip)
+        tas_done = get_pcap_transactions(ifn, args.drop_ip)
 
         match_frames = None
         if args.display_filter:

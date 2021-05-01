@@ -50,15 +50,6 @@ file.
 sigshark is still under development. It currently has the following
 limitations:
 
-- The transaction tracking currently only works for pcaps that contain
-  traffic for a single endpoint, or more precisely, for a single
-  TCAP-transaction-ID generating entity (which can talk to any number
-  of other nodes). The IP address of that node, as found in the pcap,
-  must be specified on the command line. __This means that traffic that
-  was captured on STPs or gateways which only forward traffic but do
-  not terminate transactions themselves can currently not be processed
-  by sigshark__
-
 - Messages belonging to transactions that are only included partially
   in the pcap file (i.e. missing `Begin` and/or `End/Abort`) will not
   be included in the resulting pcap
@@ -73,9 +64,8 @@ limitations:
 ## Usage
 
 ```
-usage: sigshark.py [-h] [--flatten] [--sort OWN_IP]
-                   [--display-filter DISPLAY_FILTER] [--drop-ip DROP_IP]
-                   [--version]
+usage: sigshark.py [-h] [--flatten] [--sort] [--display-filter DISPLAY_FILTER]
+                   [--drop-ip DROP_IP] [--version]
                    read_file write_file
 
 positional arguments:
@@ -88,10 +78,7 @@ optional arguments:
                         *must* be performed for transaction sorting to work,
                         but can be skipped to save time if the pcap file is
                         already flat
-  --sort OWN_IP, -s OWN_IP
-                        sort pcap file by tcap and diameter transactions.
-                        Specify the (start of) the ip address of the node the
-                        traffic was captured from, e.g.: '192.168.23'
+  --sort, -s            sort pcap file by tcap and diameter transactions.
   --display-filter DISPLAY_FILTER, -Y DISPLAY_FILTER
                         Wireshark display filter: the resulting pcap will
                         contain all transactions that contain at least one
