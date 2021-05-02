@@ -31,16 +31,20 @@ def getopts():
                         "one message for which the filter matches, e.g.: "
                         "'gsm_old.localValue == 2' will result in the output "
                         "containing all updateLocation transactions")
-    parser.add_argument("--insert-dummy", "-i",
+    parser.add_argument("--incomplete", "-i",
+                        action = "store_true",
+                        help = "Also store transactions whose start or end "
+                        "are missing.")
+    parser.add_argument("--dummy", "-d",
                         action = "store_true",
                         help = "Insert a dummy packet between transactions "
                         "so it is easier to see where transactions start and "
                         "end. Note: the dummy packets will be shown as "
                         "'Malformed Packet' in Wireshark")
-    parser.add_argument("--drop-ip", "-d",
+    parser.add_argument("--exclude-ip", "-x",
                         action = "append",
                         help = "(start of) ip address of packets that "
-                        "should not be considered for transaction analysis, "
+                        "should be excluded from transaction analysis, "
                         "e.g.: '10. 192.168.23.42' (can be specified multiple "
                         "times)")
     parser.add_argument("--version", "-V",
@@ -61,7 +65,7 @@ def ta_done(ta, last_frames, tas_done):
     tas_done.setdefault(ta['start_ts'], [])
     tas_done[ta['start_ts']].append(ta['frames'] + last_frames)
 
-def get_pcap_transactions(pcap_fn, drop_ips):
+def get_pcap_transactions(pcap_fn, drop_ips, include_incomplete):
     tas_done = {}
     all_pkts = 0
     dropped_ip_pkts = 0
@@ -159,6 +163,11 @@ def get_pcap_transactions(pcap_fn, drop_ips):
                 else:
                     #print(f"cannot find transaction for {pkt} - dropping")
                     dropped_pkts += 1
+                    if include_incomplete:
+                        tas[okey] = {'start_ts': pkt[EPOCH],
+                                     'frames': frames}
+                        map_tids[dkey] = okey
+                        map_tids[okey] = dkey
             elif pkt[END] or pkt[ABORT]:
                 key = '_'.join([pkt[CDPA], pkt[DTID]])
                 if key in tas:
@@ -175,6 +184,9 @@ def get_pcap_transactions(pcap_fn, drop_ips):
                 else:
                     #print(f"cannot find transaction for {pkt} - dropping")
                     dropped_pkts += 1
+                    if include_incomplete:
+                        ta_done({'start_ts': pkt[EPOCH], 'frames': frames}, [],
+                                tas_done)
             elif pkt[DIAHBH]:
                 key = "_".join([pkt[DIAHBH], pkt[DIAE2E]])
                 if int(pkt[DIAREQ]):
@@ -186,15 +198,22 @@ def get_pcap_transactions(pcap_fn, drop_ips):
                 else:
                     #print(f"cannot find dia transaction for {pkt} - dropping")
                     dropped_pkts += 1
+                    if include_incomplete:
+                        ta_done({'start_ts': pkt[EPOCH], 'frames': frames}, [],
+                                tas_done)
             else:
                 unsupported_pkts += 1
+
+        if include_incomplete:
+            for key in tas:
+                ta_done(tas[key], [], tas_done)
 
     print(f"\ntotal number of pkts read: {all_pkts}\n"
           f"dropped non-supported pkts: {unsupported_pkts}\n"
           f"pkts dropped due to missing begin of transaction: {dropped_pkts}\n"
           f"transactions dropped due to missing end: ", len(tas), "\n"
           f"pkts dropped by ip filter: {dropped_ip_pkts}\n"
-          f"number of completed tcap/diameter transactions found: {completed_tas}")
+          f"number of tcap/diameter transactions saved: {completed_tas}")
     return tas_done
 
 def flatten_sctp(ldlt, pkt):
@@ -345,8 +364,7 @@ def write_pcap(pcap_fn, pcap_hdr, frames):
 
         print(f"wrote {frames_written} pkts")
 
-def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames,
-                      insert_dummy):
+def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames, dummy):
     with open(pcap_fn, "wb") as ofh:
         if ofh.write(pcap_hdr) != len(pcap_hdr):
             raise Exception("write failure (pcap header)")
@@ -369,7 +387,7 @@ def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames,
                         frames_written += 1
                         if ofh.write(frames[ta_frame]) != len(frames[ta_frame]):
                             raise Exception(f"write failure (frame {frame})")
-                    if insert_dummy:
+                    if dummy:
                         ofh.write(b'\x00' * 16)
 
         print(f"wrote {frames_written} pkts\nwrote {tas_written} transactions")
@@ -391,7 +409,7 @@ if args.flatten or args.sort:
 
     if args.sort:
         print(f"\n== getting transactions from pcap '{ifn}'")
-        tas_done = get_pcap_transactions(ifn, args.drop_ip)
+        tas_done = get_pcap_transactions(ifn, args.exclude_ip, args.incomplete)
 
         match_frames = None
         if args.display_filter:
@@ -400,7 +418,7 @@ if args.flatten or args.sort:
 
         print(f"\n== writing sorted pcap file '{ofn}'")
         write_sorted_pcap(tas_done, ofn, pcap_hdr, frames, match_frames,
-                          args.insert_dummy)
+                          args.dummy)
 
     print(f"\n== '{ofn}' done")
 

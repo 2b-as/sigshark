@@ -1,7 +1,7 @@
 # sigshark
 
-A tshark wrapper which adds TCAP (MAP/CAP) and Diameter transaction
-tracking/grouping
+A tshark wrapper for SS7 TCAP (MAP/CAP) and Diameter signaling data
+which adds transaction tracking/grouping
 
 ## Problems sigshark tries to solve
 
@@ -50,10 +50,6 @@ file.
 sigshark is still under development. It currently has the following
 limitations:
 
-- Messages belonging to transactions that are only included partially
-  in the pcap file (i.e. missing `Begin` and/or `End/Abort`) will not
-  be included in the resulting pcap
-
 - The IP address matching is currently done with string prefixes,
   e.g. if your own nodes operating in loadshare mode are at
   192.168.1.10 and 192.168.1.11, you can specify 192.168.1.1, but that
@@ -65,7 +61,8 @@ limitations:
 
 ```
 usage: sigshark.py [-h] [--flatten] [--sort] [--display-filter DISPLAY_FILTER]
-                   [--drop-ip DROP_IP] [--version]
+                   [--incomplete] [--dummy] [--exclude-ip EXCLUDE_IP]
+                   [--version]
                    read_file write_file
 
 positional arguments:
@@ -85,9 +82,15 @@ optional arguments:
                         message for which the filter matches, e.g.:
                         'gsm_old.localValue == 2' will result in the output
                         containing all updateLocation transactions
-  --drop-ip DROP_IP, -d DROP_IP
-                        (start of) ip address of packets that should not be
-                        considered for transaction analysis, e.g.: '10.
+  --incomplete, -i      Also store transactions whose start or end are
+                        missing.
+  --dummy, -d           Insert a dummy packet between transactions so it is
+                        easier to see where transactions start and end. Note:
+                        the dummy packets will be shown as 'Malformed Packet'
+                        in Wireshark
+  --exclude-ip EXCLUDE_IP, -x EXCLUDE_IP
+                        (start of) ip address of packets that should be
+                        excluded from transaction analysis, e.g.: '10.
                         192.168.23.42' (can be specified multiple times)
   --version, -V         show program's version number and exit
 ```
