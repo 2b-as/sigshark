@@ -62,7 +62,7 @@ limitations:
 ```
 usage: sigshark.py [-h] [--flatten] [--sort] [--display-filter DISPLAY_FILTER]
                    [--incomplete] [--dummy] [--exclude-ip EXCLUDE_IP]
-                   [--version]
+                   [--verbose] [--quiet] [--version]
                    read_file write_file
 
 positional arguments:
@@ -71,26 +71,30 @@ positional arguments:
 
 optional arguments:
   -h, --help            show this help message and exit
-  --flatten, -f         save each sctp chunk in its own sctp packet. This
+  --flatten, -f         save each sctp chunk in its own sctp packet. this
                         *must* be performed for transaction sorting to work,
                         but can be skipped to save time if the pcap file is
                         already flat
   --sort, -s            sort pcap file by tcap and diameter transactions.
   --display-filter DISPLAY_FILTER, -Y DISPLAY_FILTER
-                        Wireshark display filter: the resulting pcap will
+                        wireshark display filter: the resulting pcap will
                         contain all transactions that contain at least one
                         message for which the filter matches, e.g.:
                         'gsm_old.localValue == 2' will result in the output
-                        containing all updateLocation transactions
-  --incomplete, -i      Also store transactions whose start or end are
-                        missing.
-  --dummy, -d           Insert a dummy packet between transactions so it is
-                        easier to see where transactions start and end. Note:
+                        containing all updateLocation transactions (only with
+                        --sort)
+  --incomplete, -i      also store transactions whose start or end are
+                        missing. (only with --sort)
+  --dummy, -d           insert a dummy packet between transactions so it is
+                        easier to see where transactions start and end. note:
                         the dummy packets will be shown as 'Malformed Packet'
-                        in Wireshark
+                        in wireshark (only with --sort)
   --exclude-ip EXCLUDE_IP, -x EXCLUDE_IP
                         (start of) ip address of packets that should be
                         excluded from transaction analysis, e.g.: '10.
-                        192.168.23.42' (can be specified multiple times)
+                        192.168.23.42' (can be specified multiple times, only
+                        with --sort)
+  --verbose, -v         more output
+  --quiet, -q           less output
   --version, -V         show program's version number and exit
 ```

@@ -5,9 +5,11 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.8"
+version="0.9"
 
 import csv, sys, os, struct, argparse
+
+log_level = 'n'
 
 def getopts():
     parser = argparse.ArgumentParser()
@@ -18,7 +20,7 @@ def getopts():
     parser.add_argument("--flatten", "-f",
                         action = "store_true",
                         help = "save each sctp chunk in its own sctp packet. "
-                        "This *must* be performed for transaction sorting to "
+                        "this *must* be performed for transaction sorting to "
                         "work, but can be skipped to save time if the pcap "
                         "file is already flat")
     parser.add_argument("--sort", "-s",
@@ -26,195 +28,45 @@ def getopts():
                         help = "sort pcap file by tcap and diameter "
                         "transactions.")
     parser.add_argument("--display-filter", "-Y",
-                        help = "Wireshark display filter: the resulting pcap "
+                        help = "wireshark display filter: the resulting pcap "
                         "will contain all transactions that contain at least "
                         "one message for which the filter matches, e.g.: "
                         "'gsm_old.localValue == 2' will result in the output "
-                        "containing all updateLocation transactions")
+                        "containing all updateLocation transactions (only with "
+                        "--sort)")
     parser.add_argument("--incomplete", "-i",
                         action = "store_true",
-                        help = "Also store transactions whose start or end "
-                        "are missing.")
+                        help = "also store transactions whose start or end "
+                        "are missing. (only with --sort)")
     parser.add_argument("--dummy", "-d",
                         action = "store_true",
-                        help = "Insert a dummy packet between transactions "
+                        help = "insert a dummy packet between transactions "
                         "so it is easier to see where transactions start and "
-                        "end. Note: the dummy packets will be shown as "
-                        "'Malformed Packet' in Wireshark")
+                        "end. note: the dummy packets will be shown as "
+                        "'Malformed Packet' in wireshark (only with --sort)")
     parser.add_argument("--exclude-ip", "-x",
                         action = "append",
                         help = "(start of) ip address of packets that "
                         "should be excluded from transaction analysis, "
                         "e.g.: '10. 192.168.23.42' (can be specified multiple "
-                        "times)")
+                        "times, only with --sort)")
+    parser.add_argument("--verbose", "-v",
+                        action = "store_true",
+                        help = "more output")
+    parser.add_argument("--quiet", "-q",
+                        action = "store_true",
+                        help = "less output")
     parser.add_argument("--version", "-V",
                         action = "version",
-                        version = "sigshark v" + version)
+                        version = f"sigshark v{version}")
     return parser.parse_args()
 
-def filter_pcap(pcap_fn, filter_exp):
-    with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
-                  "-e frame.number "
-                  "-Y '" + filter_exp + "' "
-                  "-r " + pcap_fn) as fh:
-        frames = [int(frame) - 1 for frame in fh] # -1 to make it start at 0
-        print(len(frames), "matching pkts")
-        return set(frames)
-
-def ta_done(ta, last_frames, tas_done):
-    tas_done.setdefault(ta['start_ts'], [])
-    tas_done[ta['start_ts']].append(ta['frames'] + last_frames)
-
-def get_pcap_transactions(pcap_fn, drop_ips, include_incomplete):
-    tas_done = {}
-    all_pkts = 0
-    dropped_ip_pkts = 0
-    dropped_pkts = 0
-    unsupported_pkts = 0
-    completed_tas = 0
-
-    with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
-                  "-e frame.number "
-                  "-e frame.time_epoch "
-                  "-e ip.src "
-                  "-e ip.dst "
-                  "-e sccp.calling.digits "
-                  "-e sccp.called.digits "
-                  "-e tcap.otid "
-                  "-e tcap.dtid "
-                  "-e tcap.begin_element "
-                  "-e tcap.continue_element "
-                  "-e tcap.end_element "
-                  "-e tcap.abort_element "
-                  "-e diameter.flags.request "
-                  "-e diameter.hopbyhopid "
-                  "-e diameter.endtoendid "
-                  "-e sctp.fragment "
-                  "-r " + pcap_fn) as fh:
-
-        FRAME  =  0
-        EPOCH  =  1
-        IP_SRC =  2
-        IP_DST =  3
-        CGPA   =  4
-        CDPA   =  5
-        OTID   =  6
-        DTID   =  7
-        BEGIN  =  8
-        CONT   =  9
-        END    = 10
-        ABORT  = 11
-        DIAREQ = 12
-        DIAHBH = 13
-        DIAE2E = 14
-        FRAGS  = 15
-
-        tas = {}
-        map_tids = {}
-
-        for pkt in csv.reader(fh):
-
-            if len("".join([pkt[BEGIN], pkt[CONT], pkt[END], pkt[ABORT],
-                            pkt[DIAREQ]])) > 1:
-                raise Exception("pcap contains more than one chunk per sctp "
-                                "packet - run again with --flatten")
-
-            src_ips = pkt[IP_SRC].split('-')
-            dst_ips = pkt[IP_DST].split('-')
-
-            all_pkts += 1
-            if all_pkts % 10000 == 0:
-                print(str(all_pkts), "pkts processed...")
-
-            if drop_ips:
-                drop=False
-                for drop_ip in drop_ips:
-                    for ip in src_ips + dst_ips:
-                        if ip.startswith(drop_ip):
-                            drop=True
-                            dropped_ip_pkts += 1
-                            break
-                if drop:
-                    continue
-
-            frames = []
-            if pkt[FRAGS]:
-                # -1 to make it start at 0
-                frames = list(map(lambda f: int(f) - 1, pkt[FRAGS].split('-')))
-                #print("using fragments", str(frames), "instead of",
-                #      int(pkt[FRAME]) - 1)
-            else:
-                frames = [int(pkt[FRAME]) - 1] # -1 to make it start at 0
-
-            if pkt[BEGIN]:
-                tas['_'.join([pkt[CGPA], pkt[OTID]])] = {'start_ts': pkt[EPOCH],
-                                                         'frames': frames}
-            elif pkt[CONT]:
-                okey = '_'.join([pkt[CGPA], pkt[OTID]])
-                dkey = '_'.join([pkt[CDPA], pkt[DTID]])
-                if okey in tas:
-                    tas[okey]['frames'].extend(frames)
-                    map_tids[dkey] = okey
-                    map_tids[okey] = dkey
-                elif dkey in tas:
-                    tas[dkey]['frames'].extend(frames)
-                    map_tids[dkey] = okey
-                    map_tids[okey] = dkey
-                else:
-                    #print(f"cannot find transaction for {pkt} - dropping")
-                    dropped_pkts += 1
-                    if include_incomplete:
-                        tas[okey] = {'start_ts': pkt[EPOCH],
-                                     'frames': frames}
-                        map_tids[dkey] = okey
-                        map_tids[okey] = dkey
-            elif pkt[END] or pkt[ABORT]:
-                key = '_'.join([pkt[CDPA], pkt[DTID]])
-                if key in tas:
-                    ta_done(tas[key], frames, tas_done)
-                    del tas[key]
-                    if key in map_tids:
-                        del map_tids[map_tids[key]], map_tids[key]
-                    completed_tas += 1
-                elif key in map_tids:
-                    key2 = map_tids[key]
-                    ta_done(tas[key2], frames, tas_done)
-                    del tas[key2], map_tids[key], map_tids[key2]
-                    completed_tas += 1
-                else:
-                    #print(f"cannot find transaction for {pkt} - dropping")
-                    dropped_pkts += 1
-                    if include_incomplete:
-                        ta_done({'start_ts': pkt[EPOCH], 'frames': frames}, [],
-                                tas_done)
-            elif pkt[DIAHBH]:
-                key = "_".join([pkt[DIAHBH], pkt[DIAE2E]])
-                if int(pkt[DIAREQ]):
-                    tas[key] = {'start_ts': pkt[EPOCH], 'frames': frames}
-                elif key in tas:
-                    ta_done(tas[key], frames, tas_done)
-                    del tas[key]
-                    completed_tas += 1
-                else:
-                    #print(f"cannot find dia transaction for {pkt} - dropping")
-                    dropped_pkts += 1
-                    if include_incomplete:
-                        ta_done({'start_ts': pkt[EPOCH], 'frames': frames}, [],
-                                tas_done)
-            else:
-                unsupported_pkts += 1
-
-        if include_incomplete:
-            for key in tas:
-                ta_done(tas[key], [], tas_done)
-
-    print(f"\ntotal number of pkts read: {all_pkts}\n"
-          f"dropped non-supported pkts: {unsupported_pkts}\n"
-          f"pkts dropped due to missing begin of transaction: {dropped_pkts}\n"
-          f"transactions dropped due to missing end: ", len(tas), "\n"
-          f"pkts dropped by ip filter: {dropped_ip_pkts}\n"
-          f"number of tcap/diameter transactions saved: {completed_tas}")
-    return tas_done
+def log(lvl, *args):
+    if (lvl == 'q') or \
+       (lvl == 'n' and (log_level == 'n' or log_level == 'v')) or \
+       (lvl == 'v' and log_level == 'v') or \
+       (lvl[1:2] == '!' and (lvl[0:1] == log_level)):
+        print(*args)
 
 def flatten_sctp(ldlt, pkt):
     try:
@@ -278,17 +130,17 @@ def flatten_sctp(ldlt, pkt):
                     lp_old_cx = lp_cx
                 return pkts_out
     except struct.error:
-        print("corrupt pkt - cannot flatten")
+        log('v', " flatten_sctp: corrupt/unexpected pkt", str(pkt))
     return [pkt]
 
 def read_pcap(pcap_fn, flatten):
     PCAP_GLOBAL_HDR_LEN = 24
     PCAP_PKT_HDR_LEN = 16
     MAX_PKT_LEN = 32768
-    dlt_map = {0:   (lambda p: pkt[0:4]   == b'\x02\x00\x00\x00',  4),
-               1:   (lambda p: pkt[12:14] == b'\x08\x00',         14),
-               109: (lambda p: pkt[0:4]   == b'\x02\x00\x00\x00', 12),
-               113: (lambda p: pkt[14:16] == b'\x08\x00',         16)}
+    dlt_map = {0:   (lambda p: p[0:4]   == b'\x02\x00\x00\x00',  4),
+               1:   (lambda p: p[12:14] == b'\x08\x00',         14),
+               109: (lambda p: p[0:4]   == b'\x02\x00\x00\x00', 12),
+               113: (lambda p: p[14:16] == b'\x08\x00',         16)}
 
     pcap_hdr = None
     frames = []
@@ -296,7 +148,7 @@ def read_pcap(pcap_fn, flatten):
     with open(args.read_file, "rb") as ifh:
         pcap_hdr = ifh.read(PCAP_GLOBAL_HDR_LEN)
         if len(pcap_hdr) != PCAP_GLOBAL_HDR_LEN:
-            raise Exception("cannot read header - file too short?")
+            raise Exception("read_pcap: cannot read header - file too short?")
 
         endian = None
         if pcap_hdr[0:4] == b'\xd4\xc3\xb2\xa1':
@@ -304,15 +156,16 @@ def read_pcap(pcap_fn, flatten):
         elif pcap_hdr[0:4] == b'\xa1\xb2\xc3\xd4':
             endian = '>'
         else:
-            raise Exception("not a pcap file (pcap-ng is not supported!)")
+            raise Exception("read_pcap: not a pcap file (pcap-ng is not "
+                            "supported!)")
 
         ver_maj, ver_min, tz, sigfigs, snaplen, dlt = \
             struct.unpack(endian + "2H4I", pcap_hdr[4:])
-        print(f"pcap version: {ver_maj}.{ver_min}, tz offset: {tz}, "
-              f"snaplen: {snaplen}, dlt: {dlt}")
+        log('n', f" read_pcap: version: {ver_maj}.{ver_min}, tz offset: {tz}, "
+            f"snaplen: {snaplen}, dlt: {dlt}")
 
-        if tz != 0:
-            raise Exception("timezone offset other than 0 not supported")
+        if flatten and dlt not in dlt_map:
+            raise Exception(f"read_pcap: dlt {dlt} not supported")
 
         frame = 0
         while True:
@@ -326,51 +179,227 @@ def read_pcap(pcap_fn, flatten):
                                                                pkt_hdr)
             pkt = ifh.read(pkt_len)
             if len(pkt) != pkt_len:
-                raise Exception("premature eof")
+                raise Exception("read_pcap: premature eof")
 
             if flatten:
-                if dlt in dlt_map:
-                    if dlt_map[dlt][0](pkt):
-                        pkts = flatten_sctp(dlt_map[dlt][1], pkt)
-                        frames.extend(map(lambda p: struct.pack(endian + "4I",
-                                                                ts_sec,
-                                                                ts_usec,
-                                                                len(p),
-                                                                len(p)) + p,
-                                          pkts))
-                    else:
-                        print("non-ipv4 packet type not supported - skipping")
-                        frames.append(pkt_hdr + pkt)
+                if dlt_map[dlt][0](pkt):
+                    pkts = flatten_sctp(dlt_map[dlt][1], pkt)
+                    frames.extend(map(lambda p: struct.pack(endian + "4I",
+                                                            ts_sec,
+                                                            ts_usec,
+                                                            len(p),
+                                                            len(p)) + p,
+                                      pkts))
                 else:
-                    print(f"dlt {dlt} not supported - skipping")
+                    log('v', " read_pcap: flattening of non-ipv4 packet "
+                        "{frame} not supported")
                     frames.append(pkt_hdr + pkt)
             else:
                 frames.append(pkt_hdr + pkt)
 
-        print(f"read {frame} pkts")
+        log('n', f" read_pcap: read {frame} pkts")
 
     return pcap_hdr, frames
 
 def write_pcap(pcap_fn, pcap_hdr, frames):
     with open(pcap_fn, "wb") as ofh:
         if ofh.write(pcap_hdr) != len(pcap_hdr):
-            raise Exception("write failure (pcap header)")
+            raise Exception("write_pcap: write failure (header)")
 
-        frames_written = 0
+        num_frames = 0
         for frame in frames:
-            frames_written += 1
+            num_frames += 1
             if ofh.write(frame) != len(frame):
-                raise Exception("write failure (frame " + frame + ")")
+                raise Exception("write_pcap: write failure (frame "
+                                f"{num_frames})")
 
-        print(f"wrote {frames_written} pkts")
+        log('n', f" write_pcap: wrote {num_frames} pkts")
+
+def ta_done(ta, last_frames, tas_done):
+    tas_done.setdefault(ta['start_ts'], [])
+    tas_done[ta['start_ts']].append(ta['frames'] + last_frames)
+
+def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
+    tas_done = {}
+    all_pkts = 0
+    dropped_ip_pkts = 0
+    dropped_pkts = 0
+    unsupported_pkts = 0
+    saved_tas = 0
+
+    with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
+                  "-e frame.number "
+                  "-e frame.time_epoch "
+                  "-e ip.src "
+                  "-e ip.dst "
+                  "-e sccp.calling.digits "
+                  "-e sccp.called.digits "
+                  "-e tcap.otid "
+                  "-e tcap.dtid "
+                  "-e tcap.begin_element "
+                  "-e tcap.continue_element "
+                  "-e tcap.end_element "
+                  "-e tcap.abort_element "
+                  "-e diameter.flags.request "
+                  "-e diameter.hopbyhopid "
+                  "-e diameter.endtoendid "
+                  "-e sctp.fragment "
+                  "-r " + pcap_fn) as fh:
+
+        FRAME  =  0
+        EPOCH  =  1
+        IP_SRC =  2
+        IP_DST =  3
+        CGPA   =  4
+        CDPA   =  5
+        OTID   =  6
+        DTID   =  7
+        BEGIN  =  8
+        CONT   =  9
+        END    = 10
+        ABORT  = 11
+        DIAREQ = 12
+        DIAHBH = 13
+        DIAE2E = 14
+        FRAGS  = 15
+
+        tas = {}
+        map_tids = {}
+
+        for pkt in csv.reader(fh):
+
+            if len("".join([pkt[BEGIN], pkt[CONT], pkt[END], pkt[ABORT],
+                            pkt[DIAREQ]])) > 1:
+                raise Exception("get_pcap_tas: pcap contains more than one "
+                                "chunk per sctp packet - run again with "
+                                "--flatten")
+
+            src_ips = pkt[IP_SRC].split('-')
+            dst_ips = pkt[IP_DST].split('-')
+
+            all_pkts += 1
+            if all_pkts % 10000 == 0:
+                log('q', " get_pcap_tas:", str(all_pkts), "pkts processed...")
+
+            if drop_ips:
+                drop=False
+                for drop_ip in drop_ips:
+                    for ip in src_ips + dst_ips:
+                        if ip.startswith(drop_ip):
+                            drop=True
+                            dropped_ip_pkts += 1
+                            break
+                if drop:
+                    continue
+
+            frames = []
+            if pkt[FRAGS]:
+                # -1 to make it start at 0
+                frames = list(map(lambda f: int(f) - 1, pkt[FRAGS].split('-')))
+            else:
+                frames = [int(pkt[FRAME]) - 1] # -1 to make it start at 0
+
+            if pkt[BEGIN]:
+                tas['_'.join([pkt[CGPA], pkt[OTID]])] = {'start_ts': pkt[EPOCH],
+                                                         'frames': frames}
+            elif pkt[CONT]:
+                okey = '_'.join([pkt[CGPA], pkt[OTID]])
+                dkey = '_'.join([pkt[CDPA], pkt[DTID]])
+                if okey in tas:
+                    tas[okey]['frames'].extend(frames)
+                    map_tids[dkey] = okey
+                    map_tids[okey] = dkey
+                elif dkey in tas:
+                    tas[dkey]['frames'].extend(frames)
+                    map_tids[dkey] = okey
+                    map_tids[okey] = dkey
+                else:
+                    if include_incomplete:
+                        log('v', " get_pcap_tas: cannot find transaction for "
+                            f"{pkt}")
+                        tas[okey] = {'start_ts': pkt[EPOCH], 'frames': frames}
+                        map_tids[dkey] = okey
+                        map_tids[okey] = dkey
+                    else:
+                        log('v', " get_pcap_tas: cannot find transaction for "
+                            f"{pkt} - dropping")
+                        dropped_pkts += 1
+            elif pkt[END] or pkt[ABORT]:
+                key = '_'.join([pkt[CDPA], pkt[DTID]])
+                if key in tas:
+                    ta_done(tas[key], frames, tas_done)
+                    del tas[key]
+                    if key in map_tids:
+                        del map_tids[map_tids[key]], map_tids[key]
+                    saved_tas += 1
+                elif key in map_tids:
+                    key2 = map_tids[key]
+                    ta_done(tas[key2], frames, tas_done)
+                    del tas[key2], map_tids[key], map_tids[key2]
+                    saved_tas += 1
+                else:
+                    if include_incomplete:
+                        log('v', " get_pcap_tas: cannot find transaction for "
+                            f"{pkt}")
+                        ta_done({'start_ts': pkt[EPOCH], 'frames': frames}, [],
+                                tas_done)
+                        saved_tas += 1
+                    else:
+                        log('v', " get_pcap_tas: cannot find transaction for "
+                            f"{pkt} - dropping")
+                        dropped_pkts += 1
+            elif pkt[DIAHBH]:
+                key = "_".join([pkt[DIAHBH], pkt[DIAE2E]])
+                if int(pkt[DIAREQ]):
+                    tas[key] = {'start_ts': pkt[EPOCH], 'frames': frames}
+                elif key in tas:
+                    ta_done(tas[key], frames, tas_done)
+                    del tas[key]
+                    saved_tas += 1
+                else:
+                    if include_incomplete:
+                        log('v', " get_pcap_tas: cannot find transaction for "
+                            f"{pkt}")
+                        ta_done({'start_ts': pkt[EPOCH], 'frames': frames}, [],
+                                tas_done)
+                        saved_tas += 1
+                    else:
+                        log('v', " get_pcap_tas: cannot find transaction for "
+                            f"{pkt} - dropping")
+                        dropped_pkts += 1
+            else:
+                unsupported_pkts += 1
+
+        if include_incomplete:
+            for key in tas:
+                ta_done(tas[key], [], tas_done)
+            tas = {}
+
+    log('q',
+        f" total number of pkts read: {all_pkts}\n"
+        f" dropped non-supported pkts: {unsupported_pkts}\n"
+        f" pkts dropped due to missing begin of transaction: {dropped_pkts}\n"
+        f" transactions dropped due to missing end: ", len(tas), "\n"
+        f" pkts dropped by ip filter: {dropped_ip_pkts}\n"
+        f" number of tcap/diameter transactions saved: {saved_tas}")
+    return tas_done
+
+def filter_pcap(pcap_fn, filter_exp):
+    with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
+                  "-e frame.number "
+                  "-Y '" + filter_exp + "' "
+                  "-r " + pcap_fn) as fh:
+        frames = [int(frame) - 1 for frame in fh] # -1 to make it start at 0
+        log('q', " filter_pcap:", len(frames), "matching pkts")
+        return set(frames)
 
 def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames, dummy):
     with open(pcap_fn, "wb") as ofh:
         if ofh.write(pcap_hdr) != len(pcap_hdr):
-            raise Exception("write failure (pcap header)")
+            raise Exception("write_sorted_pcap: write failure (pcap header)")
 
-        frames_written = 0
-        tas_written = 0
+        num_frames = 0
+        num_tas = 0
         for start_ts in sorted(tas_done):
             for ta in tas_done[start_ts]:
                 write_ta = False
@@ -382,45 +411,57 @@ def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames, dummy):
                 else:
                     write_ta = True
                 if write_ta:
-                    tas_written += 1
+                    num_tas += 1
                     for ta_frame in ta:
-                        frames_written += 1
+                        num_frames += 1
                         if ofh.write(frames[ta_frame]) != len(frames[ta_frame]):
-                            raise Exception(f"write failure (frame {frame})")
+                            raise Exception("write_sorted_pcap: write failure "
+                                            f"(frame {num_frames})")
                     if dummy:
                         ofh.write(b'\x00' * 16)
 
-        print(f"wrote {frames_written} pkts\nwrote {tas_written} transactions")
+        log('n', f" write_sorted_pcap: wrote {num_frames} pkts\n"
+            f" wrote {num_tas} transactions")
 
 
 args = getopts()
 ifn = args.read_file
 ofn = args.write_file
 
-if args.flatten or args.sort:
+if(args.quiet and args.verbose):
+    log('q', "only one of --quiet or --verbose can be specified")
+    sys.exit(1)
+if args.quiet:
+    log_level = 'q'
+elif args.verbose:
+    log_level = 'v'
 
-    print(f"\n== reading pcap file '{ifn}'")
-    pcap_hdr, frames = read_pcap(ifn, args.flatten)
+if not args.flatten and not args.sort:
+    log('q', "nothing to do. specify --flatten and/or --sort")
+    sys.exit(1)
 
-    if args.flatten:
-        print(f"\n== writing flattened pcap file '{ofn}'")
-        write_pcap(ofn, pcap_hdr, frames)
-        ifn = ofn
+log('n', f"\n== reading pcap file '{ifn}'")
+pcap_hdr, frames = read_pcap(ifn, args.flatten)
 
-    if args.sort:
-        print(f"\n== getting transactions from pcap '{ifn}'")
-        tas_done = get_pcap_transactions(ifn, args.exclude_ip, args.incomplete)
+if args.flatten:
+    log('n', f"\n== writing flattened pcap file '{ofn}'")
+    log('q!', "Flattening")
+    write_pcap(ofn, pcap_hdr, frames)
+    ifn = ofn
 
-        match_frames = None
-        if args.display_filter:
-            print("\n== applying display filter")
-            match_frames = filter_pcap(ifn, args.display_filter)
+if args.sort:
+    log('n', f"\n== Finding transactions from pcap '{ifn}'")
+    log('q!', "Finding transactions")
+    tas_done = get_pcap_tas(ifn, args.exclude_ip, args.incomplete)
 
-        print(f"\n== writing sorted pcap file '{ofn}'")
-        write_sorted_pcap(tas_done, ofn, pcap_hdr, frames, match_frames,
-                          args.dummy)
+    match_frames = None
+    if args.display_filter:
+        log('n', "\n== applying display filter")
+        log('q!', "Applying filter")
+        match_frames = filter_pcap(ifn, args.display_filter)
 
-    print(f"\n== '{ofn}' done")
+    log('n', f"\n== writing sorted pcap file '{ofn}'")
+    write_sorted_pcap(tas_done, ofn, pcap_hdr, frames, match_frames,
+                      args.dummy)
 
-else:
-    print("nothing to do. specify --flatten and/or --sort")
+log('n', f"\n== '{ofn}' done")
