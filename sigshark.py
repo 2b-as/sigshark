@@ -403,13 +403,13 @@ def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames, dummy):
         for start_ts in sorted(tas_done):
             for ta in tas_done[start_ts]:
                 write_ta = False
-                if match_frames and len(match_frames):
+                if match_frames == None:
+                    write_ta = True
+                else:
                     for ta_frame in ta:
                         if ta_frame in match_frames:
                             write_ta = True
                             break
-                else:
-                    write_ta = True
                 if write_ta:
                     num_tas += 1
                     for ta_frame in ta:
