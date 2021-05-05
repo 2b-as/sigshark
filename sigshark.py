@@ -178,24 +178,24 @@ def read_pcap(pcap_fn, flatten):
             ts_sec, ts_usec, pkt_len, orig_len = struct.unpack(endian + "4I",
                                                                pkt_hdr)
             pkt = ifh.read(pkt_len)
-            if len(pkt) != pkt_len:
-                raise Exception("read_pcap: premature eof")
-
-            if flatten:
-                if dlt_map[dlt][0](pkt):
-                    pkts = flatten_sctp(dlt_map[dlt][1], pkt)
-                    frames.extend(map(lambda p: struct.pack(endian + "4I",
-                                                            ts_sec,
-                                                            ts_usec,
-                                                            len(p),
-                                                            len(p)) + p,
-                                      pkts))
+            if len(pkt) == pkt_len:
+                if flatten:
+                    if dlt_map[dlt][0](pkt):
+                        pkts = flatten_sctp(dlt_map[dlt][1], pkt)
+                        frames.extend(map(lambda p: struct.pack(endian + "4I",
+                                                                ts_sec,
+                                                                ts_usec,
+                                                                len(p),
+                                                                len(p)) + p,
+                                          pkts))
+                    else:
+                        log('v', " read_pcap: flattening of non-ipv4 packet "
+                            "{frame} not supported")
+                        frames.append(pkt_hdr + pkt)
                 else:
-                    log('v', " read_pcap: flattening of non-ipv4 packet "
-                        "{frame} not supported")
                     frames.append(pkt_hdr + pkt)
             else:
-                frames.append(pkt_hdr + pkt)
+                log('n', " read_pcap: premature eof")
 
         log('n', f" read_pcap: read {frame} pkts")
 
