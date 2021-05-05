@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.9"
+version="0.9.2"
 
 import csv, sys, os, struct, argparse
 
@@ -307,12 +307,14 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
                 dkey = '_'.join([pkt[CDPA], pkt[DTID]])
                 if okey in tas:
                     tas[okey]['frames'].extend(frames)
-                    map_tids[dkey] = okey
-                    map_tids[okey] = dkey
+                    if okey not in map_tids:
+                        map_tids[okey] = dkey
+                        map_tids[dkey] = okey
                 elif dkey in tas:
                     tas[dkey]['frames'].extend(frames)
-                    map_tids[dkey] = okey
-                    map_tids[okey] = dkey
+                    if okey not in map_tids:
+                        map_tids[okey] = dkey
+                        map_tids[dkey] = okey
                 else:
                     if include_incomplete:
                         log('v', " get_pcap_tas: cannot find transaction for "
