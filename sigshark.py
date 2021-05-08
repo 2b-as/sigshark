@@ -59,7 +59,45 @@ def getopts():
     parser.add_argument("--version", "-V",
                         action = "version",
                         version = f"sigshark v{version}")
-    return parser.parse_args()
+
+    args = parser.parse_args()
+
+    if(args.quiet and args.verbose):
+        log('q', "only one of --quiet or --verbose can be specified")
+        sys.exit(1)
+    if args.quiet:
+        log_level = 'q'
+    elif args.verbose:
+        log_level = 'v'
+
+    if not args.flatten and not args.sort:
+        log('q', "nothing to do. specify --flatten and/or --sort")
+        sys.exit(1)
+
+    if not args.sort and (args.display_filter or
+                          args.incomplete or
+                          args.dummy or
+                          args.exclude_ip):
+        log('q', "--display-filter, --incomplete, --dummy and --exclude-ip can "
+            "only be used in combination with --sort")
+        sys.exit(1)
+
+    log('n',
+        f"\n== parameters"
+        f"\ninput file:                   {args.read_file}"
+        f"\noutput file:                  {args.write_file}"
+        f"\nflatten:                      {'yes' if args.flatten else 'no'}"
+        f"\nsort by transaction:          {'yes' if args.sort else 'no'}")
+
+    if args.sort:
+        log('n',
+            f"display filter:               {args.display_filter or '-'}"
+            f"\nincl incomplete transactions: {'yes' if args.incomplete else 'no'}"
+            f"\ninsert dummy packets:         {'yes' if args.dummy else 'no'}"
+            f"\nexclude ip addresses:         {str(args.exclude_ip).lower()}"
+            f"\nverbose ouput:                {'yes' if args.verbose else 'no'}")
+
+    return args
 
 def log(lvl, *args):
     if (lvl == 'q') or \
@@ -190,7 +228,7 @@ def read_pcap(pcap_fn, flatten):
                                           pkts))
                     else:
                         log('v', " read_pcap: flattening of non-ipv4 packet "
-                            "{frame} not supported")
+                            f"{frame} not supported")
                         frames.append(pkt_hdr + pkt)
                 else:
                     frames.append(pkt_hdr + pkt)
@@ -279,7 +317,7 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
 
             all_pkts += 1
             if all_pkts % 10000 == 0:
-                log('q', " get_pcap_tas:", str(all_pkts), "pkts processed...")
+                log('q', f" get_pcap_tas: {str(all_pkts)} pkts processed...")
 
             if drop_ips:
                 drop=False
@@ -381,7 +419,7 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
         f" total number of pkts read: {all_pkts}\n"
         f" dropped non-supported pkts: {unsupported_pkts}\n"
         f" pkts dropped due to missing begin of transaction: {dropped_pkts}\n"
-        f" transactions dropped due to missing end:", len(tas), "\n"
+        f" transactions dropped due to missing end: {len(tas)}\n"
         f" pkts dropped by ip filter: {dropped_ip_pkts}\n"
         f" number of tcap/diameter transactions saved: {saved_tas}")
     return tas_done
@@ -389,10 +427,10 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
 def filter_pcap(pcap_fn, filter_exp):
     with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
                   "-e frame.number "
-                  "-Y '" + filter_exp + "' "
-                  "-r " + pcap_fn) as fh:
+                  f"-Y '{filter_exp}' "
+                  f"-r {pcap_fn}") as fh:
         frames = [int(frame) - 1 for frame in fh] # -1 to make it start at 0
-        log('q', " filter_pcap:", len(frames), "matching pkts")
+        log('q', f" filter_pcap: {len(frames)} matching pkts")
         return set(frames)
 
 def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames, dummy):
@@ -423,24 +461,12 @@ def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames, dummy):
                         ofh.write(b'\x00' * 16)
 
         log('n', f" write_sorted_pcap: wrote {num_frames} pkts\n"
-            f" wrote {num_tas} transactions")
+            f" write_sorted_pcap: wrote {num_tas} transactions")
 
 
 args = getopts()
 ifn = args.read_file
 ofn = args.write_file
-
-if(args.quiet and args.verbose):
-    log('q', "only one of --quiet or --verbose can be specified")
-    sys.exit(1)
-if args.quiet:
-    log_level = 'q'
-elif args.verbose:
-    log_level = 'v'
-
-if not args.flatten and not args.sort:
-    log('q', "nothing to do. specify --flatten and/or --sort")
-    sys.exit(1)
 
 log('n', f"\n== reading pcap file '{ifn}'")
 pcap_hdr, frames = read_pcap(ifn, args.flatten)
