@@ -27,7 +27,7 @@ preserving the original timestamps of the packets.
 
 If you set a filter in Wireshark, it applies only to the matching
 messages. But it might make sense to also see the other messages in
-the same TCAP transaction.
+the same TCAP or Diameter transaction.
 
 For example, when setting a filter for `updateLocation` messages, it
 might make sense to not only see the `updateLocation invoke`, but the
@@ -44,18 +44,6 @@ procedure.
 Sigshark will include all transactions which contain at least one
 message for which the Wireshark filter matches in the resulting pcap
 file.
-
-## Caveats
-
-sigshark is still under development. It currently has the following
-limitations:
-
-- The IP address matching is currently done with string prefixes,
-  e.g. if your own nodes operating in loadshare mode are at
-  192.168.1.10 and 192.168.1.11, you can specify 192.168.1.1, but that
-  will also match 192.168.1.1, 192.168.1.12, 192.168.1.100 and so on.
-
-- There are likely bugs :)
 
 ## Usage
 
@@ -90,10 +78,9 @@ optional arguments:
                         the dummy packets will be shown as 'Malformed Packet'
                         in wireshark (only with --sort)
   --exclude-ip EXCLUDE_IP, -x EXCLUDE_IP
-                        (start of) ip address of packets that should be
-                        excluded from transaction analysis, e.g.: '10.
-                        192.168.23.42' (can be specified multiple times, only
-                        with --sort)
+                        ip addresses or networks of packets that should be
+                        excluded from transaction analysis, e.g.: '10.0.0.0/8'
+                        (can be specified multiple times, only with --sort)
   --verbose, -v         more output
   --quiet, -q           less output
   --version, -V         show program's version number and exit

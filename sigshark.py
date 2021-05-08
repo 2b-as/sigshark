@@ -5,9 +5,9 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.9.2"
+version="0.9.3"
 
-import csv, sys, os, struct, argparse
+import csv, sys, os, struct, argparse, ipaddress
 
 log_level = 'n'
 
@@ -46,9 +46,9 @@ def getopts():
                         "'Malformed Packet' in wireshark (only with --sort)")
     parser.add_argument("--exclude-ip", "-x",
                         action = "append",
-                        help = "(start of) ip address of packets that "
+                        help = "ip addresses or networks of packets that "
                         "should be excluded from transaction analysis, "
-                        "e.g.: '10. 192.168.23.42' (can be specified multiple "
+                        "e.g.: '10.0.0.0/8' (can be specified multiple "
                         "times, only with --sort)")
     parser.add_argument("--verbose", "-v",
                         action = "store_true",
@@ -284,8 +284,8 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
             if drop_ips:
                 drop=False
                 for drop_ip in drop_ips:
-                    for ip in src_ips + dst_ips:
-                        if ip.startswith(drop_ip):
+                    for ip in map(ipaddress.IPv4Network, src_ips + dst_ips):
+                        if ip.subnet_of(drop_ip):
                             drop=True
                             dropped_ip_pkts += 1
                             break
@@ -381,7 +381,7 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
         f" total number of pkts read: {all_pkts}\n"
         f" dropped non-supported pkts: {unsupported_pkts}\n"
         f" pkts dropped due to missing begin of transaction: {dropped_pkts}\n"
-        f" transactions dropped due to missing end: ", len(tas), "\n"
+        f" transactions dropped due to missing end:", len(tas), "\n"
         f" pkts dropped by ip filter: {dropped_ip_pkts}\n"
         f" number of tcap/diameter transactions saved: {saved_tas}")
     return tas_done
@@ -454,7 +454,9 @@ if args.flatten:
 if args.sort:
     log('n', f"\n== Finding transactions from pcap '{ifn}'")
     log('q!', "Finding transactions")
-    tas_done = get_pcap_tas(ifn, args.exclude_ip, args.incomplete)
+    exclude_ips = list(map(ipaddress.IPv4Network, args.exclude_ip)) \
+        if args.exclude_ip else None
+    tas_done = get_pcap_tas(ifn, exclude_ips, args.incomplete)
 
     match_frames = None
     if args.display_filter:
