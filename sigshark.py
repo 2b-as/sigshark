@@ -12,6 +12,8 @@ import csv, sys, os, struct, argparse, ipaddress
 log_level = 'n'
 
 def getopts():
+    global log_level
+
     parser = argparse.ArgumentParser()
     parser.add_argument("read_file",
                         help = "input pcap filename (*not* pcap-ng!)")
