@@ -1,9 +1,17 @@
 # sigshark
 
-A tshark wrapper for SS7 TCAP (MAP/CAP) and Diameter signaling data
-which adds transaction tracking/grouping
+Sigshark makes working with SS7 TCAP (MAP/CAP) and Diameter signaling
+pcap files easier. Its features include "flattening" (putting each
+SCTP chunk in its own packet) and transaction sorting/grouping.
 
-## Problems sigshark tries to solve
+## Features
+
+### "Flattening" of pcap files
+
+Multiple MAP, CAP or Diameter messages are often bundled together into
+one SCTP packet. Sigshark can put each SCTP chunk into its own SCTP
+packet, preserving all other properties of the packet
+(e.g. timestamp).
 
 ### Sorting a pcap file by its TCAP and Diameter transactions
 
@@ -17,7 +25,7 @@ transactions are to be examined, since it has to be done sequentially,
 for every transaction. If it is a large pcap file, it will take a long
 time to set / clear each filter.
 
-Sigshark will output a pcap file in which the packets are grouped by
+Sigshark can output a pcap file in which the packets are grouped by
 transaction, i.e. the file will contain the corresponding `Begin (->
 Continue ...) -> End/Abort` or `Request -> Answer` packets next to
 each other, followed by the same for subsequent transactions, while
@@ -44,6 +52,14 @@ procedure.
 Sigshark will include all transactions which contain at least one
 message for which the Wireshark filter matches in the resulting pcap
 file.
+
+## Installation
+
+No installation is necessary, just execute `sigshark.py`.
+
+Sigshark uses `tshark` for sorting and filtering and expects to find
+it in your path for these operations. Flattening alone does _not_
+require any external tools.
 
 ## Usage
 
@@ -85,3 +101,16 @@ optional arguments:
   --quiet, -q           less output
   --version, -V         show program's version number and exit
 ```
+
+## Examples
+
+SS7 MAP pcap, as displayed in Wireshark, **without** using Sigshark:
+![MAP pcap displayed in Wireshark without Sigshark](https://github.com/2b-as/i/raw/master/map-pcap-without-sigshark.png)
+
+The same pcap, after using `sigshark.py --flatten`:
+![MAP pcap displayed in Wireshark with flattening](https://github.com/2b-as/i/raw/master/map-pcap-with-sigshark-flatten.png)
+
+And again the same pcap, after using `sigshark.py --flatten --sort
+--dummy` (transaction sorting with dummy packets inserted between
+transactions):
+![MAP pcap displayed in Wireshark with transaction sorting](https://github.com/2b-as/i/raw/master/map-pcap-with-sigshark-transaction-sort.png)
