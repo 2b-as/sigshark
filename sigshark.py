@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.9.3"
+version="0.9.4"
 
 import csv, sys, os, struct, argparse, ipaddress
 
@@ -284,6 +284,7 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
                   "-e diameter.hopbyhopid "
                   "-e diameter.endtoendid "
                   "-e sctp.fragment "
+                  "-e sctp "
                   "-r " + pcap_fn) as fh:
 
         FRAME  =  0
@@ -302,11 +303,15 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
         DIAHBH = 13
         DIAE2E = 14
         FRAGS  = 15
+        SCTP   = 16
 
         tas = {}
         map_tids = {}
 
         for pkt in csv.reader(fh):
+
+            if not pkt[SCTP]:
+                continue
 
             if len("".join([pkt[BEGIN], pkt[CONT], pkt[END], pkt[ABORT],
                             pkt[DIAREQ]])) > 1:

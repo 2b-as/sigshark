@@ -31,6 +31,9 @@ Continue ...) -> End/Abort` or `Request -> Answer` packets next to
 each other, followed by the same for subsequent transactions, while
 preserving the original timestamps of the packets.
 
+Please note that Sigshark doesn't currently support Diameter over
+TCP. Non-SCTP packets will be ignored.
+
 ### Applying filters to transactions instead of messages
 
 If you set a filter in Wireshark, it applies only to the matching
