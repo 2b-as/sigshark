@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.9.4"
+version="0.9.5"
 
 import csv, sys, os, struct, argparse, ipaddress
 
@@ -285,7 +285,7 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
                   "-e diameter.endtoendid "
                   "-e sctp.fragment "
                   "-e sctp "
-                  "-r " + pcap_fn) as fh:
+                  f"-r '{pcap_fn}'") as fh:
 
         FRAME  =  0
         EPOCH  =  1
@@ -435,7 +435,7 @@ def filter_pcap(pcap_fn, filter_exp):
     with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
                   "-e frame.number "
                   f"-Y '{filter_exp}' "
-                  f"-r {pcap_fn}") as fh:
+                  f"-r '{pcap_fn}'") as fh:
         frames = [int(frame) - 1 for frame in fh] # -1 to make it start at 0
         log('q', f" filter_pcap: {len(frames)} matching pkts")
         return set(frames)
