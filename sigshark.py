@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.9.5"
+version="0.9.6"
 
 import csv, sys, os, struct, argparse, ipaddress
 
@@ -268,6 +268,7 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
     saved_tas = 0
 
     with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
+                  "-e frame.encap_type "
                   "-e frame.number "
                   "-e frame.time_epoch "
                   "-e ip.src "
@@ -287,30 +288,31 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
                   "-e sctp "
                   f"-r '{pcap_fn}'") as fh:
 
-        FRAME  =  0
-        EPOCH  =  1
-        IP_SRC =  2
-        IP_DST =  3
-        CGPA   =  4
-        CDPA   =  5
-        OTID   =  6
-        DTID   =  7
-        BEGIN  =  8
-        CONT   =  9
-        END    = 10
-        ABORT  = 11
-        DIAREQ = 12
-        DIAHBH = 13
-        DIAE2E = 14
-        FRAGS  = 15
-        SCTP   = 16
+        ENCAP  =  0
+        FRAME  =  1
+        EPOCH  =  2
+        IP_SRC =  3
+        IP_DST =  4
+        CGPA   =  5
+        CDPA   =  6
+        OTID   =  7
+        DTID   =  8
+        BEGIN  =  9
+        CONT   = 10
+        END    = 11
+        ABORT  = 12
+        DIAREQ = 13
+        DIAHBH = 14
+        DIAE2E = 15
+        FRAGS  = 16
+        SCTP   = 17
 
         tas = {}
         map_tids = {}
 
         for pkt in csv.reader(fh):
 
-            if not pkt[SCTP]:
+            if not pkt[SCTP] and not pkt[ENCAP] in ['42', '43', '75', '101']:
                 continue
 
             if len("".join([pkt[BEGIN], pkt[CONT], pkt[END], pkt[ABORT],
