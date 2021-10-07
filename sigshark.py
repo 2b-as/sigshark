@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.9.6"
+version="0.9.7"
 
 import csv, sys, os, struct, argparse, ipaddress
 
@@ -22,24 +22,28 @@ def getopts():
     parser.add_argument("--flatten", "-f",
                         action = "store_true",
                         help = "save each sctp chunk in its own sctp packet. "
-                        "this *must* be performed for transaction sorting to "
+                        "this *must* be performed for transaction tracking to "
                         "work, but can be skipped to save time if the pcap "
-                        "file is already flat")
+                        "file has already been flattened")
+    parser.add_argument("--track", "-t",
+                        action = "store_true",
+                        help = "enable transaction tracking to sort or filter "
+                        "based on tcap or diameter transactions")
     parser.add_argument("--sort", "-s",
                         action = "store_true",
                         help = "sort pcap file by tcap and diameter "
-                        "transactions.")
+                        "transactions (implies --track)")
     parser.add_argument("--display-filter", "-Y",
                         help = "wireshark display filter: the resulting pcap "
                         "will contain all transactions that contain at least "
                         "one message for which the filter matches, e.g.: "
                         "'gsm_old.localValue == 2' will result in the output "
-                        "containing all updateLocation transactions (only with "
-                        "--sort)")
+                        "containing all updateLocation transactions (requires "
+                        "--track or --sort)")
     parser.add_argument("--incomplete", "-i",
                         action = "store_true",
                         help = "also store transactions whose start or end "
-                        "are missing. (only with --sort)")
+                        "are missing. (requires --track or --sort)")
     parser.add_argument("--dummy", "-d",
                         action = "store_true",
                         help = "insert a dummy packet between transactions "
@@ -51,7 +55,7 @@ def getopts():
                         help = "ip addresses or networks of packets that "
                         "should be excluded from transaction analysis, "
                         "e.g.: '10.0.0.0/8' (can be specified multiple "
-                        "times, only with --sort)")
+                        "times, requires --track or --sort)")
     parser.add_argument("--verbose", "-v",
                         action = "store_true",
                         help = "more output")
@@ -63,6 +67,8 @@ def getopts():
                         version = f"sigshark v{version}")
 
     args = parser.parse_args()
+    if args.sort:
+        args.track = True
 
     if(args.quiet and args.verbose):
         log('q', "only one of --quiet or --verbose can be specified")
@@ -72,16 +78,19 @@ def getopts():
     elif args.verbose:
         log_level = 'v'
 
-    if not args.flatten and not args.sort:
-        log('q', "nothing to do. specify --flatten and/or --sort")
+    if not args.flatten and not args.track:
+        log('q', "nothing to do. specify --flatten and/or --track and/or --sort")
         sys.exit(1)
 
-    if not args.sort and (args.display_filter or
-                          args.incomplete or
-                          args.dummy or
-                          args.exclude_ip):
-        log('q', "--display-filter, --incomplete, --dummy and --exclude-ip can "
-            "only be used in combination with --sort")
+    if not args.track and (args.display_filter or
+                           args.incomplete or
+                           args.exclude_ip):
+        log('q', "--display-filter, --incomplete and --exclude-ip can only be "
+            "used in combination with --track or --sort")
+        sys.exit(1)
+
+    if not args.sort and args.dummy:
+        log('q', "--dummy can only be used in combination with --sort")
         sys.exit(1)
 
     log('n',
@@ -89,9 +98,10 @@ def getopts():
         f"\ninput file:                   {args.read_file}"
         f"\noutput file:                  {args.write_file}"
         f"\nflatten:                      {'yes' if args.flatten else 'no'}"
+        f"\ntransaction tracking:         {'yes' if args.track else 'no'}"
         f"\nsort by transaction:          {'yes' if args.sort else 'no'}")
 
-    if args.sort:
+    if args.track:
         log('n',
             f"display filter:               {args.display_filter or '-'}"
             f"\nincl incomplete transactions: {'yes' if args.incomplete else 'no'}"
@@ -433,44 +443,47 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
         f" number of tcap/diameter transactions saved: {saved_tas}")
     return tas_done
 
-def filter_pcap(pcap_fn, filter_exp):
+def filter_pcap(pcap_fn, filter_exp, tas_done):
     with os.popen("tshark -Tfields -Eseparator=, -Eoccurrence=a -Eaggregator=- "
                   "-e frame.number "
                   f"-Y '{filter_exp}' "
                   f"-r '{pcap_fn}'") as fh:
         frames = [int(frame) - 1 for frame in fh] # -1 to make it start at 0
         log('q', f" filter_pcap: {len(frames)} matching pkts")
-        return set(frames)
 
-def write_sorted_pcap(tas_done, pcap_fn, pcap_hdr, frames, match_frames, dummy):
-    with open(pcap_fn, "wb") as ofh:
-        if ofh.write(pcap_hdr) != len(pcap_hdr):
-            raise Exception("write_sorted_pcap: write failure (pcap header)")
-
-        num_frames = 0
+        tas_filtered = {}
         num_tas = 0
-        for start_ts in sorted(tas_done):
+        for start_ts in tas_done:
             for ta in tas_done[start_ts]:
-                write_ta = False
-                if match_frames == None:
-                    write_ta = True
-                else:
-                    for ta_frame in ta:
-                        if ta_frame in match_frames:
-                            write_ta = True
-                            break
-                if write_ta:
-                    num_tas += 1
-                    for ta_frame in ta:
-                        num_frames += 1
-                        if ofh.write(frames[ta_frame]) != len(frames[ta_frame]):
-                            raise Exception("write_sorted_pcap: write failure "
-                                            f"(frame {num_frames})")
-                    if dummy:
-                        ofh.write(b'\x00' * 16)
+                for ta_frame in ta:
+                    if ta_frame in frames:
+                        tas_filtered.setdefault(start_ts, [])
+                        tas_filtered[start_ts].append(ta)
+                        num_tas += 1
+                        break
+        log('n', f" filter_pcap: {num_tas} matching transactions")
+        return tas_filtered
 
-        log('n', f" write_sorted_pcap: wrote {num_frames} pkts\n"
-            f" write_sorted_pcap: wrote {num_tas} transactions")
+def sort_tas(tas_done, frames, dummy):
+    sorted_frames = []
+    num_frames = 0
+    num_tas = 0
+
+    for start_ts in sorted(tas_done):
+        for ta in tas_done[start_ts]:
+            sorted_frames += map(lambda p: frames[p], ta)
+            num_frames += len(ta)
+            num_tas += 1
+            if dummy:
+                sorted_frames.append(b'\x00' * 16)
+
+    log('v', f" sort_tas: {num_frames} pkts\n"
+        f" sort_tas: {num_tas} transactions")
+    return sorted_frames
+
+def unsorted_tas(tas_done, frames):
+    return map(lambda p: frames[p],
+               sorted([z for x in list(tas_done.values()) for y in x for z in y]))
 
 
 args = getopts()
@@ -478,29 +491,34 @@ ifn = args.read_file
 ofn = args.write_file
 
 log('n', f"\n== reading pcap file '{ifn}'")
+log('q!', "Flattening")
 pcap_hdr, frames = read_pcap(ifn, args.flatten)
 
 if args.flatten:
     log('n', f"\n== writing flattened pcap file '{ofn}'")
-    log('q!', "Flattening")
     write_pcap(ofn, pcap_hdr, frames)
     ifn = ofn
 
-if args.sort:
-    log('n', f"\n== Finding transactions from pcap '{ifn}'")
+if args.track:
+    log('n', f"\n== finding transactions from pcap '{ifn}'")
     log('q!', "Finding transactions")
     exclude_ips = list(map(ipaddress.IPv4Network, args.exclude_ip)) \
         if args.exclude_ip else None
     tas_done = get_pcap_tas(ifn, exclude_ips, args.incomplete)
 
-    match_frames = None
     if args.display_filter:
         log('n', "\n== applying display filter")
         log('q!', "Applying filter")
-        match_frames = filter_pcap(ifn, args.display_filter)
+        tas_done = filter_pcap(ifn, args.display_filter, tas_done)
 
-    log('n', f"\n== writing sorted pcap file '{ofn}'")
-    write_sorted_pcap(tas_done, ofn, pcap_hdr, frames, match_frames,
-                      args.dummy)
+    if args.sort:
+        log('n', f"\n== sorting transactions")
+        log('q!', "Sorting transactions")
+        frames = sort_tas(tas_done, frames, args.dummy)
+    else:
+        frames = unsorted_tas(tas_done, frames)
+
+    log('n', f"\n== writing processed pcap file '{ofn}'")
+    write_pcap(ofn, pcap_hdr, frames)
 
 log('n', f"\n== '{ofn}' done")

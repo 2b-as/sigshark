@@ -67,9 +67,9 @@ require any external tools.
 ## Usage
 
 ```
-usage: sigshark.py [-h] [--flatten] [--sort] [--display-filter DISPLAY_FILTER]
-                   [--incomplete] [--dummy] [--exclude-ip EXCLUDE_IP]
-                   [--verbose] [--quiet] [--version]
+usage: sigshark.py [-h] [--flatten] [--track] [--sort]
+                   [--display-filter DISPLAY_FILTER] [--incomplete] [--dummy]
+                   [--exclude-ip EXCLUDE_IP] [--verbose] [--quiet] [--version]
                    read_file write_file
 
 positional arguments:
@@ -79,19 +79,22 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   --flatten, -f         save each sctp chunk in its own sctp packet. this
-                        *must* be performed for transaction sorting to work,
-                        but can be skipped to save time if the pcap file is
-                        already flat
-  --sort, -s            sort pcap file by tcap and diameter transactions.
+                        *must* be performed for transaction tracking to work,
+                        but can be skipped to save time if the pcap file has
+                        already been flattened
+  --track, -t           enable transaction tracking to sort or filter based on
+                        tcap or diameter transactions
+  --sort, -s            sort pcap file by tcap and diameter transactions
+                        (implies --track)
   --display-filter DISPLAY_FILTER, -Y DISPLAY_FILTER
                         wireshark display filter: the resulting pcap will
                         contain all transactions that contain at least one
                         message for which the filter matches, e.g.:
                         'gsm_old.localValue == 2' will result in the output
-                        containing all updateLocation transactions (only with
-                        --sort)
+                        containing all updateLocation transactions (requires
+                        --track or --sort)
   --incomplete, -i      also store transactions whose start or end are
-                        missing. (only with --sort)
+                        missing. (requires --track or --sort)
   --dummy, -d           insert a dummy packet between transactions so it is
                         easier to see where transactions start and end. note:
                         the dummy packets will be shown as 'Malformed Packet'
@@ -99,7 +102,8 @@ optional arguments:
   --exclude-ip EXCLUDE_IP, -x EXCLUDE_IP
                         ip addresses or networks of packets that should be
                         excluded from transaction analysis, e.g.: '10.0.0.0/8'
-                        (can be specified multiple times, only with --sort)
+                        (can be specified multiple times, requires --track or
+                        --sort)
   --verbose, -v         more output
   --quiet, -q           less output
   --version, -V         show program's version number and exit
