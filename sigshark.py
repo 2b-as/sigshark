@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.9.7"
+version="0.9.8"
 
 import csv, sys, os, struct, argparse, ipaddress
 
@@ -285,6 +285,7 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
                   "-e ip.dst "
                   "-e sccp.calling.digits "
                   "-e sccp.called.digits "
+                  "-e sccp.msg.fragment "
                   "-e tcap.otid "
                   "-e tcap.dtid "
                   "-e tcap.begin_element "
@@ -305,17 +306,18 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
         IP_DST =  4
         CGPA   =  5
         CDPA   =  6
-        OTID   =  7
-        DTID   =  8
-        BEGIN  =  9
-        CONT   = 10
-        END    = 11
-        ABORT  = 12
-        DIAREQ = 13
-        DIAHBH = 14
-        DIAE2E = 15
-        FRAGS  = 16
-        SCTP   = 17
+        SEGS   =  7
+        OTID   =  8
+        DTID   =  9
+        BEGIN  = 10
+        CONT   = 11
+        END    = 12
+        ABORT  = 13
+        DIAREQ = 14
+        DIAHBH = 15
+        DIAE2E = 16
+        FRAGS  = 17
+        SCTP   = 18
 
         tas = {}
         map_tids = {}
@@ -350,9 +352,14 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
                     continue
 
             frames = []
-            if pkt[FRAGS]:
+            if pkt[SEGS] or pkt[FRAGS]:
+                flist = []
+                if pkt[SEGS]:
+                    flist += pkt[SEGS].split('-')
+                if pkt[FRAGS]:
+                    flist += pkt[FRAGS].split('-')
                 # -1 to make it start at 0
-                frames = list(map(lambda f: int(f) - 1, pkt[FRAGS].split('-')))
+                frames = list(map(lambda f: int(f) - 1, flist))
             else:
                 frames = [int(pkt[FRAME]) - 1] # -1 to make it start at 0
 
