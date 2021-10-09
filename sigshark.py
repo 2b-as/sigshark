@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.9.8"
+version="0.9.9"
 
 import csv, sys, os, struct, argparse, ipaddress
 
@@ -283,7 +283,9 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
                   "-e frame.time_epoch "
                   "-e ip.src "
                   "-e ip.dst "
+                  "-e sccp.calling.ssn "
                   "-e sccp.calling.digits "
+                  "-e sccp.called.ssn "
                   "-e sccp.called.digits "
                   "-e sccp.msg.fragment "
                   "-e tcap.otid "
@@ -304,20 +306,22 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
         EPOCH  =  2
         IP_SRC =  3
         IP_DST =  4
-        CGPA   =  5
-        CDPA   =  6
-        SEGS   =  7
-        OTID   =  8
-        DTID   =  9
-        BEGIN  = 10
-        CONT   = 11
-        END    = 12
-        ABORT  = 13
-        DIAREQ = 14
-        DIAHBH = 15
-        DIAE2E = 16
-        FRAGS  = 17
-        SCTP   = 18
+        CGSSN  =  5
+        CGPA   =  6
+        CDSSN  =  7
+        CDPA   =  8
+        SEGS   =  9
+        OTID   = 10
+        DTID   = 11
+        BEGIN  = 12
+        CONT   = 13
+        END    = 14
+        ABORT  = 15
+        DIAREQ = 16
+        DIAHBH = 17
+        DIAE2E = 18
+        FRAGS  = 19
+        SCTP   = 20
 
         tas = {}
         map_tids = {}
@@ -364,11 +368,11 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
                 frames = [int(pkt[FRAME]) - 1] # -1 to make it start at 0
 
             if pkt[BEGIN]:
-                tas['_'.join([pkt[CGPA], pkt[OTID]])] = {'start_ts': pkt[EPOCH],
-                                                         'frames': frames}
+                tas['_'.join([pkt[CGSSN], pkt[CGPA], pkt[OTID]])] \
+                    = {'start_ts': pkt[EPOCH], 'frames': frames}
             elif pkt[CONT]:
-                okey = '_'.join([pkt[CGPA], pkt[OTID]])
-                dkey = '_'.join([pkt[CDPA], pkt[DTID]])
+                okey = '_'.join([pkt[CGSSN], pkt[CGPA], pkt[OTID]])
+                dkey = '_'.join([pkt[CDSSN], pkt[CDPA], pkt[DTID]])
                 if okey in tas:
                     tas[okey]['frames'].extend(frames)
                     if okey not in map_tids:
@@ -391,7 +395,7 @@ def get_pcap_tas(pcap_fn, drop_ips, include_incomplete):
                             f"{pkt} - dropping")
                         dropped_pkts += 1
             elif pkt[END] or pkt[ABORT]:
-                key = '_'.join([pkt[CDPA], pkt[DTID]])
+                key = '_'.join([pkt[CDSSN], pkt[CDPA], pkt[DTID]])
                 if key in tas:
                     ta_done(tas[key], frames, tas_done)
                     del tas[key]
