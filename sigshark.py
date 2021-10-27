@@ -5,7 +5,7 @@
 # Copyright (c) 2021 Tobias Engel <tobias@sternraute.de>
 # All Rights Reserved
 
-version="0.9.9"
+version="0.9.10"
 
 import csv, sys, os, struct, argparse, ipaddress
 
@@ -187,10 +187,11 @@ def read_pcap(pcap_fn, flatten):
     PCAP_GLOBAL_HDR_LEN = 24
     PCAP_PKT_HDR_LEN = 16
     MAX_PKT_LEN = 32768
-    dlt_map = {0:   (lambda p: p[0:4]   == b'\x02\x00\x00\x00',  4),
-               1:   (lambda p: p[12:14] == b'\x08\x00',         14),
-               109: (lambda p: p[0:4]   == b'\x02\x00\x00\x00', 12),
-               113: (lambda p: p[14:16] == b'\x08\x00',         16)}
+    dlt_map = {0:   (lambda p: p[0:4]   == b'\x02\x00\x00\x00',  4), # NULL
+               1:   (lambda p: p[12:14] == b'\x08\x00',         14), # EN10MB
+               109: (lambda p: p[0:4]   == b'\x02\x00\x00\x00', 12), # ENC
+               113: (lambda p: p[14:16] == b'\x08\x00',         16), # LINUX_SLL
+               276: (lambda p: p[0:2]   == b'\x08\x00',         20)} # LINUX_SLL2
 
     pcap_hdr = None
     frames = []
