@@ -144,6 +144,9 @@ def flatten_sctp(ldlt, pkt):
             lp_sctp = lbef + lih + 12
             # get len of first chunk (2 = chunk len field pos)
             lc1, = struct.unpack("!H", pkt[(lp_sctp + 2):(lp_sctp + 4)])
+            # chunk len includes header, so min len is 4
+            if lc1 < 4:
+                raise Exception(f"invalid chunk length {lc1}")
             # add padding bytes to len (if any)
             lc1 += (4 - (lc1 % 4)) if (lc1 % 4) else 0
             # calc len of pkt from start to end of first chunk
@@ -164,6 +167,9 @@ def flatten_sctp(ldlt, pkt):
                     # get len of next chunk (2 = chunk length field pos)
                     lcx, = struct.unpack("!H", pkt[(lp_old_cx + 2):
                                                    (lp_old_cx + 4)])
+                    # chunk len includes header, so min len is 4
+                    if lcx < 4:
+                        raise Exception(f"invalid chunk length {lcx}")
                     # add padding bytes to len (if any)
                     lcx += (4 - (lcx % 4)) if (lcx % 4) else 0
                     # calc end position of current chunk
@@ -181,6 +187,8 @@ def flatten_sctp(ldlt, pkt):
                 return pkts_out
     except struct.error:
         log('v', " flatten_sctp: corrupt/unexpected pkt", str(pkt))
+    except Exception as e:
+        log('v', f" flatten_sctp: {e}, corrupt/unexpected pkt", str(pkt))
     return [pkt]
 
 def read_pcap(pcap_fn, flatten):
